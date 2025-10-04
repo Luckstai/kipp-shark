@@ -1,0 +1,43 @@
+[tool.poetry]
+name = "kipp-shark"
+version = "0.1.0"
+description = "Sistema para download e processamento de dados de plâncton do NASA Earthdata"
+authors = ["Lucas <seu-email@exemplo.com>"]
+readme = "README.md"
+packages = [{include = "kipp_shark", from = "."}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+xarray = "^2024.7.0"
+matplotlib = "^3.9.0"
+cartopy = "^0.23.0"
+pandas = "^2.3.0"
+netcdf4 = "^1.7.0"
+numpy = "^2.0.0"
+scipy = "^1.11.0"
+earthaccess = "^0.15.1"
+uvicorn = {extras = ["standard"], version = "^0.24.0"}
+plotly = "^5.17.0"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0.0"
+black = "^23.0.0"
+flake8 = "^6.0.0"
+mypy = "^1.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+download-plancton = "download_plancton:main"
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true

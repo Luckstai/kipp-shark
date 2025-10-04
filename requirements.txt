@@ -1,0 +1,10 @@
+xarray>=2024.7.0
+matplotlib>=3.9.0
+cartopy>=0.23.0
+pandas>=2.3.0
+netcdf4>=1.7.0
+numpy>=2.0.0
+scipy>=1.11.0
+earthaccess>=0.15.1
+uvicorn[standard]>=0.24.0
+plotly>=5.17.0
