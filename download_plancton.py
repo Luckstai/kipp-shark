@@ -9,7 +9,7 @@ from earthaccess_manager import get_earth_manager
 download_dir = "downloads/planctons"
 os.makedirs(download_dir, exist_ok=True)
 
-MAX_LOOKBACK_DAYS = 7
+MAX_LOOKBACK_DAYS = 1
 
 # ==============================
 # Helpers
@@ -32,17 +32,16 @@ def summarize_nc(filepath):
     return summary
 
 def export_csv(filepath, downsample=4):
-    """Exporta NetCDF para CSV com lat, lon, chlor_a e data"""
+    """Exporta NetCDF para CSV com lat, lon, chlor_a, data e estatísticas globais"""
     print(f"📝 Gerando CSV para {filepath}...")
     ds = nc.Dataset(filepath)
     lats = ds.variables["lat"][:]
     lons = ds.variables["lon"][:]
     chlor_a = ds.variables["chlor_a"][:]
 
-    # Extrai a data do arquivo NetCDF
-    data_str = None
+    # ============ Extrai data ============ #
+    data_formatada = "data_nao_encontrada"
     try:
-        # Tenta extrair data de diferentes atributos globais
         if hasattr(ds, 'time_coverage_start'):
             data_str = ds.time_coverage_start
         elif hasattr(ds, 'start_time'):
@@ -52,58 +51,54 @@ def export_csv(filepath, downsample=4):
         elif hasattr(ds, 'end_time'):
             data_str = ds.end_time
         else:
-            # Tenta extrair do nome do arquivo como fallback
-            filename = os.path.basename(filepath)
-            # Procura por padrão de data no nome do arquivo (ex: A2024001)
             import re
+            filename = os.path.basename(filepath)
             date_match = re.search(r'A(\d{7})', filename)
             if date_match:
                 julian_day = date_match.group(1)
                 year = julian_day[:4]
                 day_of_year = julian_day[4:]
                 data_str = f"{year}-{day_of_year.zfill(3)}"
-        
-        # Converte para formato de data mais legível se possível
+            else:
+                data_str = None
+
         if data_str:
-            try:
-                # Tenta converter para datetime e depois para string formatada
-                if 'T' in data_str:
-                    # Formato ISO com tempo
-                    data_obj = datetime.datetime.fromisoformat(data_str.replace('Z', '+00:00'))
-                    data_formatada = data_obj.strftime('%Y-%m-%d')
-                elif len(data_str) == 8 and data_str.isdigit():
-                    # Formato YYYYMMDD
-                    data_obj = datetime.datetime.strptime(data_str, '%Y%m%d')
-                    data_formatada = data_obj.strftime('%Y-%m-%d')
-                elif '-' in data_str and len(data_str.split('-')) == 2:
-                    # Formato YYYY-DDD (julian day)
-                    year, day = data_str.split('-')
-                    data_obj = datetime.datetime(int(year), 1, 1) + datetime.timedelta(days=int(day)-1)
-                    data_formatada = data_obj.strftime('%Y-%m-%d')
-                else:
-                    data_formatada = data_str
-            except:
-                data_formatada = data_str
-        else:
-            data_formatada = "data_nao_encontrada"
-            
+            if 'T' in data_str:
+                data_obj = datetime.datetime.fromisoformat(data_str.replace('Z', '+00:00'))
+            elif len(data_str) == 8 and data_str.isdigit():
+                data_obj = datetime.datetime.strptime(data_str, '%Y%m%d')
+            elif '-' in data_str and len(data_str.split('-')) == 2:
+                year, day = data_str.split('-')
+                data_obj = datetime.datetime(int(year), 1, 1) + datetime.timedelta(days=int(day)-1)
+            else:
+                data_obj = None
+            if data_obj:
+                data_formatada = data_obj.strftime('%Y-%m-%d')
     except Exception as e:
         print(f"⚠️ Erro ao extrair data: {e}")
-        data_formatada = "data_nao_encontrada"
 
-    # Meshgrid compatível com as dimensões
+    # ============ Estatísticas globais ============ #
+    chlor_a_min = float(np.nanmin(chlor_a))
+    chlor_a_max = float(np.nanmax(chlor_a))
+    lat_range = (float(lats.min()), float(lats.max()))
+    lon_range = (float(lons.min()), float(lons.max()))
+    date_created = getattr(ds, 'date_created', data_formatada)
+
+    # ============ Gera o DataFrame ============ #
     lon_grid, lat_grid = np.meshgrid(lons, lats)
-
-    # Flatten
     data = {
         "latitude": lat_grid.flatten(),
         "longitude": lon_grid.flatten(),
         "chlor_a": chlor_a.flatten(),
-        "data": [data_formatada] * len(lat_grid.flatten())  # Adiciona data para cada ponto
+        "chlor_a_min": [chlor_a_min] * len(lat_grid.flatten()),
+        "chlor_a_max": [chlor_a_max] * len(lat_grid.flatten()),
+        "lat_range": [lat_range] * len(lat_grid.flatten()),
+        "lon_range": [lon_range] * len(lat_grid.flatten()),
+        "date_created": [date_created] * len(lat_grid.flatten())
     }
+
     df = pd.DataFrame(data).dropna(subset=["chlor_a"])
 
-    # Downsample opcional para reduzir tamanho do CSV
     if downsample > 1:
         df = df.iloc[::downsample, :]
 
@@ -113,6 +108,7 @@ def export_csv(filepath, downsample=4):
 
     ds.close()
     return output_csv
+
 
 def buscar_dataset(short_name, label):
     """
