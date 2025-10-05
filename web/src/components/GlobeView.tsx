@@ -5,414 +5,465 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { Map, useControl } from "react-map-gl/maplibre";
 import type { ViewState } from "react-map-gl/maplibre";
 import { MapboxOverlay as DeckOverlay } from "@deck.gl/mapbox";
-
 import Papa from "papaparse";
-import { HexagonLayer, HeatmapLayer } from "@deck.gl/aggregation-layers";
-import { ScatterplotLayer } from "@deck.gl/layers";
+import { ScatterplotLayer, PolygonLayer } from "@deck.gl/layers";
+import { H3HexagonLayer } from "@deck.gl/geo-layers";
+import * as h3 from "h3-js";
+import LayerControlPanel from "./LayerControlPanel";
 
-// =========================
-// Tipos
-// =========================
+type LayerId = "plankton" | "sst" | "swot" | "sharks" | "predictions";
+
 type LayerConfig = {
-  id: "plankton" | "sst" | "swot" | "sharks" | "predictions";
+  id: LayerId;
   name: string;
+  color: string;
   enabled: boolean;
-  opacity: number; // 0..1
+  opacity: number;
 };
 
 type DataPoint = { [key: string]: any };
 
-// =========================
-// Estado inicial do mapa
-// =========================
 const INITIAL_VIEW_STATE: ViewState = {
-  longitude: -60,
-  latitude: 15,
+  longitude: 0,
+  latitude: 0,
   zoom: 1.6,
   pitch: 0,
   bearing: 0,
 };
 
-// =========================
-// Overlay DeckGL como controle do MapLibre
-// =========================
+const hexToRgb = (hex: string): [number, number, number] => {
+  const sanitized = hex.replace("#", "").trim();
+  if (sanitized.length === 3) {
+    const r = parseInt(sanitized[0] + sanitized[0], 16);
+    const g = parseInt(sanitized[1] + sanitized[1], 16);
+    const b = parseInt(sanitized[2] + sanitized[2], 16);
+    if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+      return [r, g, b];
+    }
+  }
+
+  if (sanitized.length === 6) {
+    const bigint = parseInt(sanitized, 16);
+    if (Number.isFinite(bigint)) {
+      const r = (bigint >> 16) & 255;
+      const g = (bigint >> 8) & 255;
+      const b = bigint & 255;
+      return [r, g, b];
+    }
+  }
+
+  return [255, 255, 255];
+};
+
+type GradientStop = {
+  t: number;
+  color: [number, number, number];
+  hex: string;
+};
+
+const SST_GRADIENT: GradientStop[] = [
+  { t: 0, color: [33, 102, 172], hex: "#2166ac" },
+  { t: 0.25, color: [67, 147, 195], hex: "#4393c3" },
+  { t: 0.5, color: [146, 197, 222], hex: "#92c5de" },
+  { t: 0.75, color: [253, 219, 199], hex: "#fddbc7" },
+  { t: 1, color: [215, 48, 39], hex: "#d73027" },
+];
+
+const PREDICTION_GRADIENT: GradientStop[] = [
+  { t: 0, color: [17, 94, 89], hex: "#115e59" },
+  { t: 0.25, color: [13, 148, 136], hex: "#0d9488" },
+  { t: 0.5, color: [45, 212, 191], hex: "#2dd4bf" },
+  { t: 0.75, color: [250, 204, 21], hex: "#facc15" },
+  { t: 1, color: [220, 38, 38], hex: "#dc2626" },
+];
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
+
+const interpolateGradientColor = (
+  t: number,
+  stops: GradientStop[]
+): [number, number, number] => {
+  const clampedT = clamp(t, 0, 1);
+
+  for (let i = 0; i < stops.length - 1; i += 1) {
+    const current = stops[i];
+    const next = stops[i + 1];
+    if (clampedT >= current.t && clampedT <= next.t) {
+      const localT =
+        (clampedT - current.t) / (next.t - current.t === 0 ? 1 : next.t - current.t);
+      const r = Math.round(
+        current.color[0] + (next.color[0] - current.color[0]) * localT
+      );
+      const g = Math.round(
+        current.color[1] + (next.color[1] - current.color[1]) * localT
+      );
+      const b = Math.round(
+        current.color[2] + (next.color[2] - current.color[2]) * localT
+      );
+      return [r, g, b];
+    }
+  }
+
+  return stops[stops.length - 1].color;
+};
+
+const getSstColor = (
+  value: number,
+  range: { min: number; max: number }
+): [number, number, number, number] => {
+  if (!Number.isFinite(value)) {
+    return [67, 147, 195, 180];
+  }
+  const span = range.max - range.min;
+  const normalized = span === 0 ? 0 : (value - range.min) / span;
+  const [r, g, b] = interpolateGradientColor(normalized, SST_GRADIENT);
+  return [r, g, b, 220];
+};
+
+const getSstElevation = (value: number, range: { min: number; max: number }) => {
+  if (!Number.isFinite(value)) return 0;
+  const span = range.max - range.min;
+  const normalized = span === 0 ? 0 : (value - range.min) / span;
+  const clamped = clamp(normalized, 0, 1);
+  return clamped * 60000;
+};
+
+const getPredictionColor = (value: number): [number, number, number, number] => {
+  if (!Number.isFinite(value)) {
+    return [13, 148, 136, 200];
+  }
+  const normalized = clamp(value, 0, 1);
+  const [r, g, b] = interpolateGradientColor(normalized, PREDICTION_GRADIENT);
+  return [r, g, b, 220];
+};
+
+const getPredictionElevation = (value: number) => {
+  if (!Number.isFinite(value)) return 0;
+  const clamped = clamp(value, 0, 1);
+  return clamped * 50000;
+};
+
 function DeckGLOverlay(props: any) {
   const overlay = useControl(() => new DeckOverlay(props));
   overlay.setProps(props);
   return null;
 }
 
-// =========================
-// Painel mínimo de controle (inline)
-// =========================
-function LayerControlPanel({
-  layers,
-  onToggle,
-  onOpacity,
-}: {
-  layers: LayerConfig[];
-  onToggle: (id: LayerConfig["id"]) => void;
-  onOpacity: (id: LayerConfig["id"], value: number) => void;
-}) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: 16,
-        right: 16,
-        background: "rgba(5,10,30,0.85)",
-        color: "#e2e8f0",
-        padding: 12,
-        borderRadius: 12,
-        border: "1px solid rgba(0,255,255,0.2)",
-        zIndex: 10,
-        width: 280,
-      }}
-    >
-      <h3 style={{ margin: "0 0 8px 0", color: "#22d3ee" }}>Layers</h3>
-      {layers.map((l) => (
-        <div
-          key={l.id}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr auto",
-            gap: 8,
-            alignItems: "center",
-            marginBottom: 10,
-          }}
-        >
-          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={l.enabled}
-              onChange={() => onToggle(l.id)}
-            />
-            {l.name}
-          </label>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={l.opacity}
-            onChange={(e) => onOpacity(l.id, Number(e.target.value))}
-            title="Opacity"
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// =========================
-// Componente principal
-// =========================
 export default function GlobeApp() {
-  // dados CSV
   const [planktonData, setPlanktonData] = useState<DataPoint[]>([]);
   const [sstData, setSstData] = useState<DataPoint[]>([]);
   const [swotData, setSwotData] = useState<DataPoint[]>([]);
   const [sharksData, setSharksData] = useState<DataPoint[]>([]);
   const [predData, setPredData] = useState<DataPoint[]>([]);
+  const [sstRange, setSstRange] = useState({ min: 0, max: 1 });
 
-  // camadas
   const [layers, setLayers] = useState<LayerConfig[]>([
     {
       id: "plankton",
       name: "Plankton (Chlorophyll)",
+      color: "#1a9850",
       enabled: true,
       opacity: 0.85,
     },
     {
       id: "sst",
       name: "Sea Surface Temperature",
+      color: "#d73027",
       enabled: true,
       opacity: 0.75,
     },
-    { id: "swot", name: "Ocean Eddies (SSH)", enabled: false, opacity: 0.85 },
-    { id: "sharks", name: "Shark Occurrences", enabled: true, opacity: 1.0 },
+    {
+      id: "swot",
+      name: "Ocean Eddies (SSH)",
+      color: "#fdae61",
+      enabled: false,
+      opacity: 0.85,
+    },
+    {
+      id: "sharks",
+      name: "Shark Occurrences",
+      color: "#f1c40f",
+      enabled: true,
+      opacity: 1.0,
+    },
     {
       id: "predictions",
       name: "Predicted Zones",
+      color: "#4575b4",
       enabled: false,
       opacity: 0.55,
     },
   ]);
 
-  // util para carregar CSV
+  const handleToggleLayer = useCallback((layerId: LayerId) => {
+    setLayers((prev) =>
+      prev.map((layer) =>
+        layer.id === layerId ? { ...layer, enabled: !layer.enabled } : layer
+      )
+    );
+  }, []);
+
+  const handleOpacityChange = useCallback((layerId: LayerId, opacity: number) => {
+    setLayers((prev) =>
+      prev.map((layer) =>
+        layer.id === layerId ? { ...layer, opacity } : layer
+      )
+    );
+  }, []);
+
   const loadCSV = useCallback(
-    (
-      path: string,
-      setter: (rows: DataPoint[]) => void,
-      requiredKeys: string[]
-    ) => {
+    (path: string, setter: (rows: DataPoint[]) => void) => {
       Papa.parse(path, {
         download: true,
         header: true,
         dynamicTyping: true,
         skipEmptyLines: true,
         complete: ({ data }) => {
-          const rows = (data as DataPoint[]).filter((r) =>
-            requiredKeys.every(
-              (k) => r[k] !== undefined && r[k] !== null && r[k] !== ""
-            )
-          );
-          setter(rows);
+          const rows = (data as DataPoint[])
+            .map((entry) => {
+              const row: DataPoint = { ...entry };
+
+              const h3field =
+                row.h3 ||
+                row.h3_index ||
+                row.h3_cell ||
+                row.h3_id ||
+                row.h3Index ||
+                row.h;
+
+              if (typeof h3field === "string" && h3field.length) {
+                row.h3 = h3field;
+                try {
+                  const [lat, lon] = h3.cellToLatLng(h3field);
+                  // deck/gl usa [lon, lat]
+                  if (!Number.isFinite(row.latitude)) row.latitude = lat;
+                  if (!Number.isFinite(row.longitude)) row.longitude = lon;
+                } catch (error) {
+                  // ignora h3 inválido sem interromper o fluxo
+                }
+              }
+
+              const latCandidate =
+                row.latitude ??
+                row.centroid_lat ??
+                row.lat ??
+                row.Latitude ??
+                row.LAT ??
+                row.centroidLat;
+              const lonCandidate =
+                row.longitude ??
+                row.centroid_lon ??
+                row.lon ??
+                row.Longitude ??
+                row.LON ??
+                row.centroidLon;
+
+              if (latCandidate !== undefined && lonCandidate !== undefined) {
+                const lat = Number(latCandidate);
+                const lon = Number(lonCandidate);
+                if (Number.isFinite(lat) && Number.isFinite(lon)) {
+                  row.latitude = lat;
+                  row.longitude = lon;
+                }
+              }
+
+              return row;
+            })
+            .filter((row) => {
+              const hasH3 = typeof row.h3 === "string" && row.h3.length > 0;
+              const hasCoords =
+                Number.isFinite(row.latitude) &&
+                Number.isFinite(row.longitude) &&
+                Math.abs(Number(row.latitude)) <= 90 &&
+                Math.abs(Number(row.longitude)) <= 180;
+              return hasH3 || hasCoords;
+            });
+
+          const normalized = rows.map((row) => {
+            if (
+              row.prediction !== undefined &&
+              row.probability === undefined &&
+              Number.isFinite(Number(row.prediction))
+            ) {
+              row.probability = Number(row.prediction);
+            }
+            return row;
+          });
+
+          setter(normalized);
         },
       });
     },
     []
   );
 
-  // carrega seus 5 CSVs (conforme os formatos que você enviou)
   useEffect(() => {
-    // plancton: centroid_lat, centroid_lon, chlor_a_mean, ...
-    loadCSV("/data/plancton.csv", setPlanktonData, [
-      "centroid_lat",
-      "centroid_lon",
-      "chlor_a_mean",
-    ]);
-
-    // sst: latitude, longitude, sst_mean_celsius, ...
-    loadCSV("/data/sst.csv", setSstData, [
-      "latitude",
-      "longitude",
-      "sst_mean_celsius",
-    ]);
-
-    // swot: latitude, longitude, ssha_karin, ...
-    loadCSV("/data/swot.csv", setSwotData, [
-      "latitude",
-      "longitude",
-      "ssha_karin",
-    ]);
-
-    // sharks: centroid_lat, centroid_lon, species, date, ...
-    loadCSV("/data/sharks.csv", setSharksData, [
-      "centroid_lat",
-      "centroid_lon",
-    ]);
-
-    // predictions(opcional): lat, lon, probability
-    loadCSV("/data/predictions.csv", setPredData, ["lat", "lon"]);
+    loadCSV("/data/plancton_20241117.csv", setPlanktonData);
+    loadCSV("/data/sst_20241117.csv", setSstData);
+    loadCSV("/data/swot_20251001.csv", setSwotData);
+    loadCSV("/data/sharks_20241117.csv", setSharksData);
+    loadCSV("/data/predictions.csv", setPredData);
   }, [loadCSV]);
+
+  useEffect(() => {
+    if (!sstData.length) {
+      setSstRange({ min: 0, max: 1 });
+      return;
+    }
+
+    const values = sstData
+      .map((row) => Number(row.sst_mean_celsius))
+      .filter((value) => Number.isFinite(value));
+
+    if (!values.length) {
+      setSstRange({ min: 0, max: 1 });
+      return;
+    }
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (Number.isFinite(min) && Number.isFinite(max)) {
+      setSstRange({ min, max });
+    }
+  }, [sstData]);
 
   const getLayerCfg = useCallback(
     (id: LayerConfig["id"]) => layers.find((l) => l.id === id),
     [layers]
   );
 
-  // Tooltips (DeckOverlay aceita getTooltip)
   const getTooltip = useCallback(({ object }: any) => {
     if (!object) return null;
-
-    // plâncton
-    if ("chlor_a_mean" in object) {
-      const lat = object.centroid_lat ?? object.lat ?? object.latitude;
-      const lon = object.centroid_lon ?? object.lon ?? object.longitude;
-      return {
-        html: `<div style="padding:8px;border:1px solid #22d3ee;border-radius:8px;background:#0b1220;color:#e2e8f0">
-          <div style="color:#22d3ee;font-weight:600">Plankton</div>
-          Chlor_a_mean: ${Number(object.chlor_a_mean).toFixed(2)} mg/m³<br/>
-          Lat: ${Number(lat).toFixed(2)}, Lon: ${Number(lon).toFixed(2)}
-        </div>`,
-      };
+    if ("chlor_a_mean" in object)
+      return { html: `<b>Plankton</b><br>Chlorophyll: ${object.chlor_a_mean}` };
+    if ("sst_mean_celsius" in object)
+      return { html: `<b>SST</b><br>${object.sst_mean_celsius} °C` };
+    if ("ssha_karin" in object)
+      return { html: `<b>SSH</b><br>${object.ssha_karin}` };
+    if ("species" in object)
+      return { html: `<b>${object.species}</b><br>${object.date}` };
+    if ("probability" in object || "prediction" in object) {
+      const value = Number(object.probability ?? object.prediction ?? 0);
+      if (Number.isFinite(value)) {
+        return {
+          html: `<b>Prediction</b><br>${(value * 100).toFixed(0)}%`,
+        };
+      }
     }
-
-    // sst
-    if ("sst_mean_celsius" in object) {
-      return {
-        html: `<div style="padding:8px;border:1px solid #ef4444;border-radius:8px;background:#0b1220;color:#e2e8f0">
-          <div style="color:#ef4444;font-weight:600">Sea Surface Temp</div>
-          SST mean: ${Number(object.sst_mean_celsius).toFixed(2)} °C<br/>
-          Anomaly: ${
-            "anomaly_celsius" in object
-              ? Number(object.anomaly_celsius).toFixed(2)
-              : "—"
-          } °C
-        </div>`,
-      };
-    }
-
-    // swot
-    if ("ssha_karin" in object) {
-      return {
-        html: `<div style="padding:8px;border:1px solid #f59e0b;border-radius:8px;background:#0b1220;color:#e2e8f0">
-          <div style="color:#f59e0b;font-weight:600">Eddy / SSH</div>
-          SSHA: ${Number(object.ssha_karin).toFixed(2)} m
-        </div>`,
-      };
-    }
-
-    // sharks
-    if ("species" in object || "n_obs" in object) {
-      return {
-        html: `<div style="padding:8px;border:1px solid #fbbf24;border-radius:8px;background:#0b1220;color:#e2e8f0">
-          <div style="color:#fbbf24;font-weight:600">Shark</div>
-          ${object.species ? `Species: ${object.species}<br/>` : ""}
-          ${object.date ? `Date: ${object.date}<br/>` : ""}
-          ${object.n_obs ? `Observations: ${object.n_obs}` : ""}
-        </div>`,
-      };
-    }
-
-    // predictions
-    if ("probability" in object) {
-      return {
-        html: `<div style="padding:8px;border:1px solid #ef4444;border-radius:8px;background:#0b1220;color:#e2e8f0">
-          <div style="color:#ef4444;font-weight:600">Prediction</div>
-          Probability: ${(Number(object.probability) * 100).toFixed(0)}%
-        </div>`,
-      };
-    }
-
     return null;
   }, []);
 
-  // Layers deck.gl (injetadas no Map via DeckOverlay)
   const deckLayers = useMemo(() => {
     const arr: any[] = [];
 
-    // 🟢 Plâncton (HexagonLayer em centroides)
-    if (getLayerCfg("plankton")?.enabled && planktonData.length) {
+    const planktonCfg = getLayerCfg("plankton");
+    if (planktonCfg?.enabled && planktonData.length) {
+      const [r, g, b] = hexToRgb(planktonCfg.color);
       arr.push(
-        new HexagonLayer({
-          id: "plankton-hex",
+        new PolygonLayer({
+          id: "plankton-h3",
           data: planktonData,
-          getPosition: (d: any) => [
-            Number(d.centroid_lon),
-            Number(d.centroid_lat),
-          ],
-          getElevationWeight: (d: any) => Number(d.chlor_a_mean) || 0,
-          elevationScale: 50000,
-          radius: 90000,
-          coverage: 0.85,
-          opacity: getLayerCfg("plankton")!.opacity,
+          getPolygon: (d) =>
+            d.h3
+              ? h3.cellToBoundary(d.h3, true).map(([lat, lon]) => [lon, lat])
+              : null,
+          getFillColor: [r, g, b, 200],
+          getLineColor: [r, g, b, 220],
+          lineWidthMinPixels: 1,
+          stroked: true,
+          filled: true,
+          opacity: planktonCfg.opacity,
           pickable: true,
-          colorRange: [
-            [26, 152, 80],
-            [102, 189, 99],
-            [166, 217, 106],
-            [217, 239, 139],
-            [255, 255, 191],
-          ],
-          parameters: { depthTest: false },
         })
       );
     }
 
-    // 🔥 SST (HexagonLayer em pontos lat/lon)
-    if (getLayerCfg("sst")?.enabled && sstData.length) {
+    const sstCfg = getLayerCfg("sst");
+    if (sstCfg?.enabled && sstData.length) {
       arr.push(
-        new HexagonLayer({
-          id: "sst-hex",
+        new H3HexagonLayer({
+          id: "sst-h3",
           data: sstData,
-          getPosition: (d: any) => [Number(d.longitude), Number(d.latitude)],
-          getElevationWeight: (d: any) => Number(d.sst_mean_celsius) || 0,
-          elevationScale: 22000,
-          radius: 90000,
-          coverage: 0.8,
-          opacity: getLayerCfg("sst")!.opacity,
+          opacity: sstCfg.opacity,
           pickable: true,
-          colorRange: [
-            [33, 102, 172],
-            [67, 147, 195],
-            [146, 197, 222],
-            [209, 229, 240],
-            [253, 219, 199],
-            [244, 165, 130],
-            [214, 96, 77],
-            [178, 24, 43],
-          ],
-          parameters: { depthTest: false },
+          getHexagon: (d) => d.h3,
+          getFillColor: (d) =>
+            getSstColor(Number(d.sst_mean_celsius), sstRange),
+          getElevation: (d) =>
+            getSstElevation(Number(d.sst_mean_celsius), sstRange),
+          extruded: true,
         })
       );
     }
 
-    // 🌪️ SWOT (Scatterplot em lat/lon; raio por ssha)
-    if (getLayerCfg("swot")?.enabled && swotData.length) {
+    const swotCfg = getLayerCfg("swot");
+    if (swotCfg?.enabled && swotData.length) {
       arr.push(
         new ScatterplotLayer({
           id: "swot-scatter",
           data: swotData,
-          getPosition: (d: any) => [Number(d.longitude), Number(d.latitude)],
-          getRadius: (d: any) =>
-            Math.max(3_0000, Math.abs(Number(d.ssha_karin) || 0.2) * 70_000),
-          getFillColor: (d: any) =>
-            d.eddy_type === "Cyclonic"
-              ? [255, 140, 0, 200]
-              : [255, 200, 120, 200],
-          opacity: getLayerCfg("swot")!.opacity,
-          pickable: true,
+          getPosition: (d) => [d.longitude, d.latitude],
+          getRadius: 70000,
+          radiusScale: 1,
           radiusMinPixels: 2,
-          radiusMaxPixels: 32,
+          radiusMaxPixels: 30,
+          getFillColor: (d) => {
+            const ssh = Number(d.ssha_karin) || 0;
+            return ssh >= 0 ? [253, 174, 97, 220] : [49, 54, 149, 220];
+          },
+          opacity: swotCfg.opacity,
+          stroked: false,
+          pickable: true,
         })
       );
     }
 
-    // 🦈 Sharks (Scatter em centroides)
-    if (getLayerCfg("sharks")?.enabled && sharksData.length) {
+    const sharksCfg = getLayerCfg("sharks");
+    if (sharksCfg?.enabled && sharksData.length) {
+      const [r, g, b] = hexToRgb(sharksCfg.color);
       arr.push(
         new ScatterplotLayer({
           id: "sharks-scatter",
           data: sharksData,
-          getPosition: (d: any) => [
-            Number(d.centroid_lon),
-            Number(d.centroid_lat),
-          ],
-          getRadius: (d: any) =>
-            Math.min(120_000, 40_000 + (Number(d.n_obs) || 1) * 10_000),
-          getFillColor: [255, 215, 0, 255],
-          opacity: getLayerCfg("sharks")!.opacity,
+          getPosition: (d) => [d.longitude, d.latitude],
+          getRadius: 80000,
+          radiusMinPixels: 3,
+          getFillColor: [r, g, b, 240],
+          opacity: sharksCfg.opacity,
           pickable: true,
-          radiusMinPixels: 4,
-          radiusMaxPixels: 18,
-          stroked: true,
-          lineWidthMinPixels: 1.5,
-          getLineColor: [255, 255, 160],
         })
       );
     }
 
-    // 🔮 Predições (Heatmap em lat/lon)
-    if (getLayerCfg("predictions")?.enabled && predData.length) {
+    const predCfg = getLayerCfg("predictions");
+    if (predCfg?.enabled && predData.length) {
       arr.push(
-        new HeatmapLayer({
-          id: "pred-heat",
+        new H3HexagonLayer({
+          id: "predictions-h3",
           data: predData,
-          getPosition: (d: any) => [Number(d.lon), Number(d.lat)],
-          getWeight: (d: any) => Number(d.probability) || 0.5,
-          radiusPixels: 50,
-          intensity: 2,
-          threshold: 0.05,
-          opacity: getLayerCfg("predictions")!.opacity,
-          colorRange: [
-            [255, 255, 204, 30],
-            [255, 237, 160, 80],
-            [254, 217, 118, 120],
-            [254, 178, 76, 160],
-            [253, 141, 60, 220],
-            [227, 26, 28, 255],
-          ],
+          opacity: predCfg.opacity,
+          pickable: true,
+          getHexagon: (d) => d.h3,
+          getFillColor: (d) =>
+            getPredictionColor(Number(d.probability ?? d.prediction)),
+          getElevation: (d) =>
+            getPredictionElevation(Number(d.probability ?? d.prediction)),
+          extruded: true,
         })
       );
     }
 
     return arr;
-  }, [planktonData, sstData, swotData, sharksData, predData, getLayerCfg]);
-
-  // handlers UI
-  const handleToggle = useCallback((id: LayerConfig["id"]) => {
-    setLayers((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, enabled: !l.enabled } : l))
-    );
-  }, []);
-
-  const handleOpacity = useCallback((id: LayerConfig["id"], value: number) => {
-    setLayers((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, opacity: value } : l))
-    );
-  }, []);
+  }, [
+    planktonData,
+    sstData,
+    swotData,
+    sharksData,
+    predData,
+    sstRange,
+    getLayerCfg,
+  ]);
 
   return (
     <div
@@ -420,25 +471,21 @@ export default function GlobeApp() {
         position: "absolute",
         inset: 0,
         background: "linear-gradient(180deg,#000,#0a1a2b)",
+        overflow: "hidden",
       }}
     >
       <LayerControlPanel
         layers={layers}
-        onToggle={handleToggle}
-        onOpacity={handleOpacity}
+        onToggleLayer={handleToggleLayer}
+        onOpacityChange={handleOpacityChange}
       />
-
       <Map
         reuseMaps
         projection="globe"
         initialViewState={INITIAL_VIEW_STATE}
-        // Carto Dark Matter estilo GL (funciona com globe)
         mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
-        dragRotate={false}
-        maxPitch={0}
         style={{ width: "100%", height: "100%" }}
       >
-        {/* Deck.gl como overlay do MapLibre (igual ao exemplo que você mandou) */}
         <DeckGLOverlay
           layers={deckLayers}
           getTooltip={getTooltip}

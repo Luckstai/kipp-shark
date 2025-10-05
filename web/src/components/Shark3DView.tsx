@@ -15,9 +15,18 @@ import {
   Fish as FishIcon,
   Satellite,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import * as THREE from "three";
 
 // 🦈 Modelo 3D do tubarão com animação
+type SensorCard = {
+  icon: LucideIcon;
+  name: string;
+  desc: string;
+  color: string;
+  column: "left" | "right";
+};
+
 function SharkModel() {
   const sharkRef = useRef<THREE.Group>(null);
   const { scene, animations } = useGLTF("/models/shark.glb");
@@ -70,43 +79,72 @@ function SharkModel() {
 }
 
 export default function Shark3DView() {
-  const sensors = [
+  const sensors: SensorCard[] = [
     {
       icon: Thermometer,
       name: "Temperature",
       desc: "Monitors water and body temperature",
       color: "from-red-500 to-orange-500",
-      position: "top-20 left-10",
+      column: "left" as const,
     },
     {
       icon: Activity,
       name: "Acceleration",
       desc: "Detects hunting activity",
       color: "from-purple-500 to-pink-500",
-      position: "top-[240px] left-10", // ⬇️ leve ajuste
+      column: "left" as const,
     },
     {
       icon: Ruler,
       name: "Depth",
       desc: "Tracks dive depth and movement",
       color: "from-blue-500 to-cyan-500",
-      position: "top-20 right-10",
+      column: "right" as const,
     },
     {
       icon: Satellite,
       name: "GPS",
       desc: "Tracks migration and patterns",
       color: "from-yellow-500 to-amber-500",
-      position: "top-[240px] right-10", // ⬇️ ajustado
+      column: "right" as const,
     },
     {
       icon: FishIcon,
       name: "Prey Analysis",
       desc: "Detects what the shark is eating",
       color: "from-green-500 to-emerald-500",
-      position: "top-[460px] right-10", // ⬇️ mais afastado
+      column: "right" as const,
     },
   ];
+
+  const leftSensors = sensors.filter((sensor) => sensor.column === "left");
+  const rightSensors = sensors.filter((sensor) => sensor.column === "right");
+  const renderSensorCard = (sensor: SensorCard, index: number) => {
+    const Icon = sensor.icon;
+    return (
+      <motion.div
+        key={sensor.name}
+        initial={{ opacity: 0, scale: 0 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{
+          delay: 0.8 + index * 0.1,
+          type: "spring",
+          stiffness: 200,
+        }}
+        className="pointer-events-auto"
+      >
+        <div className="backdrop-blur-md bg-slate-900/90 rounded-xl p-4 border border-cyan-500/30 shadow-xl max-w-[200px]">
+          <div
+            className={`w-12 h-12 rounded-full bg-gradient-to-br ${sensor.color} flex items-center justify-center mb-3`}
+          >
+            <Icon className="w-6 h-6 text-white" />
+          </div>
+          <h4 className="text-white font-semibold mb-1">{sensor.name}</h4>
+          <p className="text-slate-300 text-sm">{sensor.desc}</p>
+        </div>
+      </motion.div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-blue-950 to-cyan-950 pt-24 pb-16">
@@ -193,35 +231,18 @@ export default function Shark3DView() {
             </div>
           </motion.div>
 
-          {/* Sensores ajustados */}
-          {sensors.map((sensor, index) => {
-            const Icon = sensor.icon;
-            return (
-              <motion.div
-                key={sensor.name}
-                initial={{ opacity: 0, scale: 0 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{
-                  delay: 0.8 + index * 0.1,
-                  type: "spring",
-                  stiffness: 200,
-                }}
-                className={`absolute ${sensor.position} hidden lg:block`}
-              >
-                <div className="backdrop-blur-md bg-slate-900/90 rounded-xl p-4 border border-cyan-500/30 shadow-xl max-w-[200px]">
-                  <div
-                    className={`w-12 h-12 rounded-full bg-gradient-to-br ${sensor.color} flex items-center justify-center mb-3`}
-                  >
-                    <Icon className="w-6 h-6 text-white" />
-                  </div>
-                  <h4 className="text-white font-semibold mb-1">
-                    {sensor.name}
-                  </h4>
-                  <p className="text-slate-300 text-sm">{sensor.desc}</p>
-                </div>
-              </motion.div>
-            );
-          })}
+          <div className="absolute inset-0 hidden lg:block pointer-events-none">
+            <div className="absolute left-8 top-24 flex flex-col gap-6 pointer-events-auto">
+              {leftSensors.map((sensor, index) =>
+                renderSensorCard(sensor, index)
+              )}
+            </div>
+            <div className="absolute right-8 top-24 flex flex-col gap-6 pointer-events-auto">
+              {rightSensors.map((sensor, index) =>
+                renderSensorCard(sensor, leftSensors.length + index)
+              )}
+            </div>
+          </div>
         </div>
 
         <motion.div
