@@ -33,7 +33,20 @@ const REMOTE_SOURCES = {
   swot: `${s3Bucket}/swot/swot_20251001.csv`,
   sharks: `${s3Bucket}/sharks/shark_full/sharks_h3r5_2015-01-01_2025-01-01.csv`,
   predictions: `${s3Bucket}/sharks-prediction/predictions.csv`,
+  sharkCarcharhinusPredictions: `${s3Bucket}/sharks-prediction/predictions_full_Carcharhinus.csv`,
+  sharkGaleocerdoPredictions: `${s3Bucket}/sharks-prediction/predictions_full_Galeocerdo.csv`,
+  sharkSphyrnaPredictions: `${s3Bucket}/sharks-prediction/predictions_full_Sphyrna.csv`,
+  sharkPrionacePredictions: `${s3Bucket}/sharks-prediction/predictions_full_Prionace.csv`,
+  sharkCarcharodonPredictions: `${s3Bucket}/sharks-prediction/predictions_full_Carcharodon.csv`,
 } as const;
+
+const PREDICTION_SPECIES_SOURCES: Record<string, string> = {
+  Carcharhinus: REMOTE_SOURCES.sharkCarcharhinusPredictions,
+  Galeocerdo: REMOTE_SOURCES.sharkGaleocerdoPredictions,
+  Sphyrna: REMOTE_SOURCES.sharkSphyrnaPredictions,
+  Prionace: REMOTE_SOURCES.sharkPrionacePredictions,
+  Carcharodon: REMOTE_SOURCES.sharkCarcharodonPredictions,
+};
 
 const CORS_PROXY = (import.meta.env.VITE_CORS_PROXY ?? "").trim();
 
@@ -273,6 +286,28 @@ export default function GlobeApp() {
   const [sstRange, setSstRange] = useState({ min: 0, max: 1 });
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
   const [isSpeciesModalOpen, setSpeciesModalOpen] = useState(false);
+  const [selectedPredictionSpecies, setSelectedPredictionSpecies] = useState<string[]>([]);
+  const [isPredictionModalOpen, setPredictionModalOpen] = useState(false);
+  const [predictionSpeciesCache, setPredictionSpeciesCache] = useState<
+    Record<string, DataPoint[]>
+  >({});
+  const [predictionSpeciesLoading, setPredictionSpeciesLoading] = useState<
+    Record<string, boolean>
+  >({});
+  const [loadingState, setLoadingState] = useState({
+    plankton: false,
+    sst: false,
+    swot: false,
+    sharks: false,
+    predictions: false,
+  });
+
+  const setDatasetLoading = useCallback(
+    (key: keyof typeof loadingState, value: boolean) => {
+      setLoadingState((prev) => ({ ...prev, [key]: value }));
+    },
+    [setLoadingState]
+  );
 
   const [layers, setLayers] = useState<LayerConfig[]>([
     {
@@ -331,54 +366,74 @@ export default function GlobeApp() {
     []
   );
 
-  const loadCSV = useCallback(
-    async (sources: string[], setter: (rows: DataPoint[]) => void) => {
-      for (const source of sources) {
-        try {
-          const requestUrl = resolveSourceUrl(source);
-          const isRemote = requestUrl.startsWith("http");
-          const response = await fetch(requestUrl, {
-            mode: isRemote ? "cors" : "same-origin",
-          });
+  const fetchCsvData = useCallback(async (sources: string[]): Promise<DataPoint[]> => {
+    for (const source of sources) {
+      try {
+        const requestUrl = resolveSourceUrl(source);
+        const isRemote = requestUrl.startsWith("http");
+        const response = await fetch(requestUrl, {
+          mode: isRemote ? "cors" : "same-origin",
+        });
 
-          if (!response.ok) {
-            continue;
-          }
+        if (!response.ok) {
+          continue;
+        }
 
-          const text = await response.text();
-          const parsed = normalizeCsvRows(parseCsvText(text));
+        const text = await response.text();
+        const parsed = normalizeCsvRows(parseCsvText(text));
 
-          if (parsed.length) {
-            setter(parsed);
-            return;
-          }
-        } catch (error) {
-          // Mantém fallback em caso de CORS ou rede indisponível
-          if (import.meta.env.DEV) {
-            console.warn(`Falha ao carregar CSV de ${source}`, error);
-          }
+        if (parsed.length) {
+          return parsed;
+        }
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.warn(`Falha ao carregar CSV de ${source}`, error);
         }
       }
+    }
 
-      setter([]);
+    return [];
+  }, []);
+
+  const loadCSV = useCallback(
+    async (
+      sources: string[],
+      setter: (rows: DataPoint[]) => void,
+      options?: { loadingKey?: keyof typeof loadingState }
+    ) => {
+      if (options?.loadingKey) setDatasetLoading(options.loadingKey, true);
+      const rows = await fetchCsvData(sources);
+      setter(rows);
+      if (options?.loadingKey) setDatasetLoading(options.loadingKey, false);
     },
-    []
+    [fetchCsvData, setDatasetLoading]
   );
 
   useEffect(() => {
     void loadCSV(
       [REMOTE_SOURCES.plankton, "/data/plancton_20241117.csv"],
-      setPlanktonData
+      setPlanktonData,
+      { loadingKey: "plankton" }
     );
-    void loadCSV([REMOTE_SOURCES.sst, "/data/sst_20241117.csv"], setSstData);
-    void loadCSV([REMOTE_SOURCES.swot, "/data/swot_20251001.csv"], setSwotData);
+    void loadCSV(
+      [REMOTE_SOURCES.sst, "/data/sst_20241117.csv"],
+      setSstData,
+      { loadingKey: "sst" }
+    );
+    void loadCSV(
+      [REMOTE_SOURCES.swot, "/data/swot_20251001.csv"],
+      setSwotData,
+      { loadingKey: "swot" }
+    );
     void loadCSV(
       [REMOTE_SOURCES.sharks, "/data/sharks_20241117.csv"],
-      setSharksData
+      setSharksData,
+      { loadingKey: "sharks" }
     );
     void loadCSV(
       [REMOTE_SOURCES.predictions, "/data/predictions.csv"],
-      setPredData
+      setPredData,
+      { loadingKey: "predictions" }
     );
   }, [loadCSV]);
 
@@ -419,13 +474,55 @@ export default function GlobeApp() {
     return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
   }, [sharksData]);
 
+  const predictionSpecies = useMemo(
+    () => Object.keys(PREDICTION_SPECIES_SOURCES).sort((a, b) => a.localeCompare(b)),
+    []
+  );
+
   useEffect(() => {
     if (!selectedSpecies.length) return;
-    const valid = selectedSpecies.filter((species) => sharkSpecies.includes(species));
+    const valid = selectedSpecies.filter((species) =>
+      sharkSpecies.includes(species)
+    );
     if (valid.length !== selectedSpecies.length) {
       setSelectedSpecies(valid);
     }
   }, [selectedSpecies, sharkSpecies]);
+
+  useEffect(() => {
+    if (!selectedPredictionSpecies.length) return;
+    const valid = selectedPredictionSpecies.filter((species) =>
+      predictionSpecies.includes(species)
+    );
+    if (valid.length !== selectedPredictionSpecies.length) {
+      setSelectedPredictionSpecies(valid);
+    }
+  }, [selectedPredictionSpecies, predictionSpecies]);
+
+  useEffect(() => {
+    selectedPredictionSpecies.forEach((species) => {
+      if (predictionSpeciesCache[species] || predictionSpeciesLoading[species]) {
+        return;
+      }
+
+      const source = PREDICTION_SPECIES_SOURCES[species];
+      if (!source) return;
+
+      setPredictionSpeciesLoading((prev) => ({ ...prev, [species]: true }));
+      fetchCsvData([source]).then((rows) => {
+      setPredictionSpeciesCache((prev) => ({ ...prev, [species]: rows }));
+      setPredictionSpeciesLoading((prev) => ({ ...prev, [species]: false }));
+      if (!rows.length && import.meta.env.DEV) {
+        console.warn(`Sem dados retornados para a espécie ${species}`);
+      }
+    });
+    });
+  }, [
+    selectedPredictionSpecies,
+    predictionSpeciesCache,
+    predictionSpeciesLoading,
+    fetchCsvData,
+  ]);
 
   const getTooltip = useCallback(({ object }: any) => {
     if (!object) return null;
@@ -447,6 +544,28 @@ export default function GlobeApp() {
     }
     return null;
   }, []);
+
+  const activePredData = useMemo(() => {
+    if (selectedPredictionSpecies.length === 0) {
+      return predData;
+    }
+
+    const combined: DataPoint[] = [];
+    selectedPredictionSpecies.forEach((species) => {
+      const rows = predictionSpeciesCache[species];
+      if (rows?.length) {
+        combined.push(...rows);
+      }
+    });
+    return combined;
+  }, [predData, selectedPredictionSpecies, predictionSpeciesCache]);
+
+  const predictionFilterLabel = useMemo(() => {
+    if (selectedPredictionSpecies.length === 0) {
+      return "Filter species";
+    }
+    return `${selectedPredictionSpecies.length} species selected`;
+  }, [selectedPredictionSpecies]);
 
   const deckLayers = useMemo(() => {
     const arr: any[] = [];
@@ -535,11 +654,11 @@ export default function GlobeApp() {
     }
 
     const predCfg = getLayerCfg("predictions");
-    if (predCfg?.enabled && predData.length) {
+    if (predCfg?.enabled && activePredData.length) {
       arr.push(
         new H3HexagonLayer({
           id: "predictions-h3",
-          data: predData,
+          data: activePredData,
           opacity: predCfg.opacity,
           pickable: true,
           getHexagon: (d) =>
@@ -559,7 +678,7 @@ export default function GlobeApp() {
     sstData,
     swotData,
     sharksData,
-    predData,
+    activePredData,
     sstRange,
     selectedSpecies,
     getLayerCfg,
@@ -580,15 +699,22 @@ export default function GlobeApp() {
         onOpacityChange={handleOpacityChange}
         onOpenSpeciesFilter={() => setSpeciesModalOpen(true)}
         hasSpeciesFilter={sharkSpecies.length > 0}
+        onOpenPredictionFilter={() => setPredictionModalOpen(true)}
+        hasPredictionFilter={predictionSpecies.length > 0}
+        predictionFilterLabel={predictionFilterLabel}
+        loadingState={loadingState}
       />
       {sharkSpecies.length > 0 && isSpeciesModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="w-[90vw] max-w-xl bg-slate-900/95 border border-cyan-500/40 rounded-2xl shadow-2xl text-slate-100 overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/60">
               <div>
-                <h3 className="text-lg font-semibold text-cyan-300">Filter Shark Species</h3>
+                <h3 className="text-lg font-semibold text-cyan-300">
+                  Filter Shark Species
+                </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Select one or more species to highlight their occurrences on the globe.
+                  Select one or more species to highlight their occurrences on
+                  the globe.
                 </p>
               </div>
               <button
@@ -659,6 +785,106 @@ export default function GlobeApp() {
               <button
                 type="button"
                 onClick={() => setSpeciesModalOpen(false)}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-cyan-500/90 text-slate-950 hover:bg-cyan-400 transition"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {predictionSpecies.length > 0 && isPredictionModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-[90vw] max-w-xl bg-slate-900/95 border border-cyan-500/40 rounded-2xl shadow-2xl text-slate-100 overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/60">
+              <div>
+                <h3 className="text-lg font-semibold text-cyan-300">
+                  Filter Predicted Zones
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Combine probability grids for selected shark species.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPredictionModalOpen(false)}
+                className="text-slate-400 hover:text-cyan-300 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="max-h-[320px] overflow-y-auto px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70 hover:border-cyan-400/60 transition cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedPredictionSpecies.length === 0}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      setSelectedPredictionSpecies([]);
+                    }
+                  }}
+                  className="accent-cyan-400"
+                />
+                <span className="text-sm font-medium">All species</span>
+              </label>
+              {predictionSpecies.map((species) => {
+                const checked = selectedPredictionSpecies.includes(species);
+                const loading = predictionSpeciesLoading[species];
+                const hasData = Boolean(predictionSpeciesCache[species]?.length);
+                return (
+                  <label
+                    key={species}
+                    className={`flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer ${
+                      checked
+                        ? "bg-cyan-500/20 border-cyan-400/60"
+                        : "bg-slate-800/70 border-slate-700/70 hover:border-cyan-400/40"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => {
+                        if (event.target.checked) {
+                          setSelectedPredictionSpecies((prev) =>
+                            prev.includes(species) ? prev : [...prev, species]
+                          );
+                        } else {
+                          setSelectedPredictionSpecies((prev) =>
+                            prev.filter((item) => item !== species)
+                          );
+                        }
+                      }}
+                      className="accent-cyan-400"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium">{species}</span>
+                      {loading && (
+                        <span className="text-xs text-cyan-300">loading…</span>
+                      )}
+                      {checked && !loading && !hasData && (
+                        <span className="text-xs text-red-300">no data</span>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-700/60 bg-slate-900/70">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedPredictionSpecies([]);
+                  setPredictionModalOpen(false);
+                }}
+                className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-200 transition"
+              >
+                Clear filters
+              </button>
+              <button
+                type="button"
+                onClick={() => setPredictionModalOpen(false)}
                 className="px-4 py-2 text-sm font-semibold rounded-lg bg-cyan-500/90 text-slate-950 hover:bg-cyan-400 transition"
               >
                 Apply

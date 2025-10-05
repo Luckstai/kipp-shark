@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Waves, BookOpen, Globe, Cpu } from "lucide-react";
 
 interface NavbarProps {
@@ -7,7 +6,7 @@ interface NavbarProps {
 }
 
 export default function Navbar({ currentSection, onNavigate }: NavbarProps) {
-  const [isScrolled, setIsScrolled] = useState(false);
+  const isScrolled = false;
 
   const sections = [
     { id: "learn", label: "Learn", icon: BookOpen },

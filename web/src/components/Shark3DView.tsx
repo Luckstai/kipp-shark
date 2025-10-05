@@ -57,7 +57,9 @@ function SharkModel() {
       }
     }
 
-    return () => mixer.stopAllAction();
+    return () => {
+      mixer?.stopAllAction();
+    };
   }, [scene, animations, actions, mixer]);
 
   useFrame((_, delta) => mixer?.update(delta));

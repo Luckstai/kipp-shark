@@ -1,29 +1,37 @@
 import { motion } from "framer-motion";
 import { Eye, EyeOff } from "lucide-react";
 
-export interface LayerConfig {
-  id: string;
+export interface LayerConfig<T extends string = string> {
+  id: T;
   name: string;
   color: string;
   enabled: boolean;
   opacity: number;
 }
 
-interface LayerControlPanelProps {
-  layers: LayerConfig[];
-  onToggleLayer: (layerId: string) => void;
-  onOpacityChange: (layerId: string, opacity: number) => void;
+interface LayerControlPanelProps<T extends string = string> {
+  layers: LayerConfig<T>[];
+  onToggleLayer: (layerId: T) => void;
+  onOpacityChange: (layerId: T, opacity: number) => void;
   onOpenSpeciesFilter?: () => void;
   hasSpeciesFilter?: boolean;
+  onOpenPredictionFilter?: () => void;
+  hasPredictionFilter?: boolean;
+  predictionFilterLabel?: string;
+  loadingState?: Partial<Record<T, boolean>>;
 }
 
-export default function LayerControlPanel({
+export default function LayerControlPanel<T extends string>({
   layers,
   onToggleLayer,
   onOpacityChange,
   onOpenSpeciesFilter,
   hasSpeciesFilter,
-}: LayerControlPanelProps) {
+  onOpenPredictionFilter,
+  hasPredictionFilter,
+  predictionFilterLabel,
+  loadingState,
+}: LayerControlPanelProps<T>) {
   return (
     <motion.div
       initial={{ x: -300, opacity: 0 }}
@@ -86,6 +94,12 @@ export default function LayerControlPanel({
                   exit={{ opacity: 0, height: 0 }}
                   className="space-y-2"
                 >
+                  {loadingState?.[layer.id] && (
+                    <div className="flex items-center gap-2 text-xs text-cyan-300">
+                      <span className="animate-spin inline-flex h-3 w-3 rounded-full border border-cyan-400 border-t-transparent" />
+                      Loading data…
+                    </div>
+                  )}
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-slate-400">Opacity</span>
                     <span className="text-cyan-400 font-medium">
@@ -112,6 +126,17 @@ export default function LayerControlPanel({
                       Filter species
                     </button>
                   )}
+                  {layer.id === "predictions" &&
+                    hasPredictionFilter &&
+                    onOpenPredictionFilter && (
+                      <button
+                        type="button"
+                        onClick={onOpenPredictionFilter}
+                        className="mt-3 w-full text-sm font-medium text-cyan-300 hover:text-cyan-100 hover:bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2 transition"
+                      >
+                        {predictionFilterLabel ?? "Filter species"}
+                      </button>
+                    )}
                 </motion.div>
               )}
             </div>
