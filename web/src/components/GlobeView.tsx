@@ -23,6 +23,19 @@ type LayerConfig = {
 
 type DataPoint = { [key: string]: any };
 
+const PREDICTIONS_URL =
+  "https://source-bucket-kipp.s3.us-west-2.amazonaws.com/hackathon-nasa-2025/sharks-prediction/predictions.csv";
+
+const CORS_PROXY = (import.meta.env.VITE_CORS_PROXY ?? "").trim();
+
+const resolveSourceUrl = (url: string) => {
+  if (CORS_PROXY && url.startsWith("http")) {
+    const encoded = encodeURIComponent(url);
+    return `${CORS_PROXY}${encoded}`;
+  }
+  return url;
+};
+
 const INITIAL_VIEW_STATE: ViewState = {
   longitude: 0,
   latitude: 0,
@@ -144,6 +157,84 @@ const getPredictionElevation = (value: number) => {
   return clamped * 50000;
 };
 
+const parseCsvText = (text: string): DataPoint[] => {
+  const { data } = Papa.parse<DataPoint>(text, {
+    header: true,
+    dynamicTyping: true,
+    skipEmptyLines: true,
+  });
+
+  return Array.isArray(data) ? data : [];
+};
+
+const normalizeCsvRows = (rows: DataPoint[]): DataPoint[] =>
+  rows
+    .map((entry) => {
+      const row: DataPoint = { ...entry };
+
+      const h3field =
+        row.h3 ||
+        row.h3_index ||
+        row.h3_cell ||
+        row.h3_id ||
+        row.h3Index ||
+        row.h;
+
+      if (typeof h3field === "string" && h3field.length) {
+        row.h3 = h3field;
+        try {
+          const [lat, lon] = h3.cellToLatLng(h3field);
+          if (!Number.isFinite(row.latitude)) row.latitude = lat;
+          if (!Number.isFinite(row.longitude)) row.longitude = lon;
+        } catch (error) {
+          // continue silently if H3 is invalid
+        }
+      }
+
+      const latCandidate =
+        row.latitude ??
+        row.centroid_lat ??
+        row.lat ??
+        row.Latitude ??
+        row.LAT ??
+        row.centroidLat;
+      const lonCandidate =
+        row.longitude ??
+        row.centroid_lon ??
+        row.lon ??
+        row.Longitude ??
+        row.LON ??
+        row.centroidLon;
+
+      if (latCandidate !== undefined && lonCandidate !== undefined) {
+        const lat = Number(latCandidate);
+        const lon = Number(lonCandidate);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          row.latitude = lat;
+          row.longitude = lon;
+        }
+      }
+
+      if (
+        row.prediction !== undefined &&
+        row.probability === undefined &&
+        Number.isFinite(Number(row.prediction))
+      ) {
+        row.probability = Number(row.prediction);
+      }
+
+      return row;
+    })
+    .filter((row) => {
+      const hasH3 = typeof row.h3 === "string" && row.h3.length > 0;
+      const hasCoords =
+        Number.isFinite(row.latitude) &&
+        Number.isFinite(row.longitude) &&
+        Math.abs(Number(row.latitude)) <= 90 &&
+        Math.abs(Number(row.longitude)) <= 180;
+      return hasH3 || hasCoords;
+    });
+
 function DeckGLOverlay(props: any) {
   const overlay = useControl(() => new DeckOverlay(props));
   overlay.setProps(props);
@@ -213,97 +304,45 @@ export default function GlobeApp() {
   }, []);
 
   const loadCSV = useCallback(
-    (path: string, setter: (rows: DataPoint[]) => void) => {
-      Papa.parse(path, {
-        download: true,
-        header: true,
-        dynamicTyping: true,
-        skipEmptyLines: true,
-        complete: ({ data }) => {
-          const rows = (data as DataPoint[])
-            .map((entry) => {
-              const row: DataPoint = { ...entry };
-
-              const h3field =
-                row.h3 ||
-                row.h3_index ||
-                row.h3_cell ||
-                row.h3_id ||
-                row.h3Index ||
-                row.h;
-
-              if (typeof h3field === "string" && h3field.length) {
-                row.h3 = h3field;
-                try {
-                  const [lat, lon] = h3.cellToLatLng(h3field);
-                  // deck/gl usa [lon, lat]
-                  if (!Number.isFinite(row.latitude)) row.latitude = lat;
-                  if (!Number.isFinite(row.longitude)) row.longitude = lon;
-                } catch (error) {
-                  // ignora h3 inválido sem interromper o fluxo
-                }
-              }
-
-              const latCandidate =
-                row.latitude ??
-                row.centroid_lat ??
-                row.lat ??
-                row.Latitude ??
-                row.LAT ??
-                row.centroidLat;
-              const lonCandidate =
-                row.longitude ??
-                row.centroid_lon ??
-                row.lon ??
-                row.Longitude ??
-                row.LON ??
-                row.centroidLon;
-
-              if (latCandidate !== undefined && lonCandidate !== undefined) {
-                const lat = Number(latCandidate);
-                const lon = Number(lonCandidate);
-                if (Number.isFinite(lat) && Number.isFinite(lon)) {
-                  row.latitude = lat;
-                  row.longitude = lon;
-                }
-              }
-
-              return row;
-            })
-            .filter((row) => {
-              const hasH3 = typeof row.h3 === "string" && row.h3.length > 0;
-              const hasCoords =
-                Number.isFinite(row.latitude) &&
-                Number.isFinite(row.longitude) &&
-                Math.abs(Number(row.latitude)) <= 90 &&
-                Math.abs(Number(row.longitude)) <= 180;
-              return hasH3 || hasCoords;
-            });
-
-          const normalized = rows.map((row) => {
-            if (
-              row.prediction !== undefined &&
-              row.probability === undefined &&
-              Number.isFinite(Number(row.prediction))
-            ) {
-              row.probability = Number(row.prediction);
-            }
-            return row;
+    async (sources: string[], setter: (rows: DataPoint[]) => void) => {
+      for (const source of sources) {
+        try {
+          const requestUrl = resolveSourceUrl(source);
+          const isRemote = requestUrl.startsWith("http");
+          const response = await fetch(requestUrl, {
+            mode: isRemote ? "cors" : "same-origin",
           });
 
-          setter(normalized);
-        },
-      });
+          if (!response.ok) {
+            continue;
+          }
+
+          const text = await response.text();
+          const parsed = normalizeCsvRows(parseCsvText(text));
+
+          if (parsed.length) {
+            setter(parsed);
+            return;
+          }
+        } catch (error) {
+          // Mantém fallback em caso de CORS ou rede indisponível
+          if (import.meta.env.DEV) {
+            console.warn(`Falha ao carregar CSV de ${source}`, error);
+          }
+        }
+      }
+
+      setter([]);
     },
     []
   );
 
   useEffect(() => {
-    loadCSV("/data/plancton_20241117.csv", setPlanktonData);
-    loadCSV("/data/sst_20241117.csv", setSstData);
-    loadCSV("/data/swot_20251001.csv", setSwotData);
-    loadCSV("/data/sharks_20241117.csv", setSharksData);
-    loadCSV("/data/predictions.csv", setPredData);
+    void loadCSV(["/data/plancton_20241117.csv"], setPlanktonData);
+    void loadCSV(["/data/sst_20241117.csv"], setSstData);
+    void loadCSV(["/data/swot_20251001.csv"], setSwotData);
+    void loadCSV(["/data/sharks_20241117.csv"], setSharksData);
+    void loadCSV([PREDICTIONS_URL, "/data/predictions.csv"], setPredData);
   }, [loadCSV]);
 
   useEffect(() => {
