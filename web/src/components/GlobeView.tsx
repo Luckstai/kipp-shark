@@ -271,6 +271,8 @@ export default function GlobeApp() {
   const [sharksData, setSharksData] = useState<DataPoint[]>([]);
   const [predData, setPredData] = useState<DataPoint[]>([]);
   const [sstRange, setSstRange] = useState({ min: 0, max: 1 });
+  const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
+  const [isSpeciesModalOpen, setSpeciesModalOpen] = useState(false);
 
   const [layers, setLayers] = useState<LayerConfig[]>([
     {
@@ -407,6 +409,24 @@ export default function GlobeApp() {
     [layers]
   );
 
+  const sharkSpecies = useMemo(() => {
+    const set = new Set<string>();
+    sharksData.forEach((row) => {
+      if (row.species) {
+        set.add(String(row.species));
+      }
+    });
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
+  }, [sharksData]);
+
+  useEffect(() => {
+    if (!selectedSpecies.length) return;
+    const valid = selectedSpecies.filter((species) => sharkSpecies.includes(species));
+    if (valid.length !== selectedSpecies.length) {
+      setSelectedSpecies(valid);
+    }
+  }, [selectedSpecies, sharkSpecies]);
+
   const getTooltip = useCallback(({ object }: any) => {
     if (!object) return null;
     if ("chlor_a_mean" in object)
@@ -496,10 +516,14 @@ export default function GlobeApp() {
     const sharksCfg = getLayerCfg("sharks");
     if (sharksCfg?.enabled && sharksData.length) {
       const [r, g, b] = hexToRgb(sharksCfg.color);
+      const filtered =
+        selectedSpecies.length === 0
+          ? sharksData
+          : sharksData.filter((row) => selectedSpecies.includes(row.species));
       arr.push(
         new ScatterplotLayer({
           id: "sharks-scatter",
-          data: sharksData,
+          data: filtered,
           getPosition: (d) => [d.longitude, d.latitude],
           getRadius: 80000,
           radiusMinPixels: 3,
@@ -537,6 +561,7 @@ export default function GlobeApp() {
     sharksData,
     predData,
     sstRange,
+    selectedSpecies,
     getLayerCfg,
   ]);
 
@@ -553,7 +578,95 @@ export default function GlobeApp() {
         layers={layers}
         onToggleLayer={handleToggleLayer}
         onOpacityChange={handleOpacityChange}
+        onOpenSpeciesFilter={() => setSpeciesModalOpen(true)}
+        hasSpeciesFilter={sharkSpecies.length > 0}
       />
+      {sharkSpecies.length > 0 && isSpeciesModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-[90vw] max-w-xl bg-slate-900/95 border border-cyan-500/40 rounded-2xl shadow-2xl text-slate-100 overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/60">
+              <div>
+                <h3 className="text-lg font-semibold text-cyan-300">Filter Shark Species</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Select one or more species to highlight their occurrences on the globe.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSpeciesModalOpen(false)}
+                className="text-slate-400 hover:text-cyan-300 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="max-h-[320px] overflow-y-auto px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70 hover:border-cyan-400/60 transition cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedSpecies.length === 0}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      setSelectedSpecies([]);
+                    }
+                  }}
+                  className="accent-cyan-400"
+                />
+                <span className="text-sm font-medium">All species</span>
+              </label>
+              {sharkSpecies.map((species) => {
+                const checked = selectedSpecies.includes(species);
+                return (
+                  <label
+                    key={species}
+                    className={`flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer ${
+                      checked
+                        ? "bg-cyan-500/20 border-cyan-400/60"
+                        : "bg-slate-800/70 border-slate-700/70 hover:border-cyan-400/40"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => {
+                        if (event.target.checked) {
+                          setSelectedSpecies((prev) => [...prev, species]);
+                        } else {
+                          setSelectedSpecies((prev) =>
+                            prev.filter((item) => item !== species)
+                          );
+                        }
+                      }}
+                      className="accent-cyan-400"
+                    />
+                    <span className="text-sm font-medium">{species}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-700/60 bg-slate-900/70">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedSpecies([]);
+                  setSpeciesModalOpen(false);
+                }}
+                className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-cyan-200 transition"
+              >
+                Clear filters
+              </button>
+              <button
+                type="button"
+                onClick={() => setSpeciesModalOpen(false)}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-cyan-500/90 text-slate-950 hover:bg-cyan-400 transition"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <Map
         reuseMaps
         projection="globe"

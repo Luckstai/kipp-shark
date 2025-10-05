@@ -13,12 +13,16 @@ interface LayerControlPanelProps {
   layers: LayerConfig[];
   onToggleLayer: (layerId: string) => void;
   onOpacityChange: (layerId: string, opacity: number) => void;
+  onOpenSpeciesFilter?: () => void;
+  hasSpeciesFilter?: boolean;
 }
 
 export default function LayerControlPanel({
   layers,
   onToggleLayer,
   onOpacityChange,
+  onOpenSpeciesFilter,
+  hasSpeciesFilter,
 }: LayerControlPanelProps) {
   return (
     <motion.div
@@ -99,6 +103,15 @@ export default function LayerControlPanel({
                     }
                     className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
                   />
+                  {layer.id === "sharks" && hasSpeciesFilter && onOpenSpeciesFilter && (
+                    <button
+                      type="button"
+                      onClick={onOpenSpeciesFilter}
+                      className="mt-3 w-full text-sm font-medium text-cyan-300 hover:text-cyan-100 hover:bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2 transition"
+                    >
+                      Filter species
+                    </button>
+                  )}
                 </motion.div>
               )}
             </div>
