@@ -10,6 +10,7 @@ import { ScatterplotLayer, PolygonLayer } from "@deck.gl/layers";
 import { H3HexagonLayer } from "@deck.gl/geo-layers";
 import * as h3 from "h3-js";
 import LayerControlPanel from "./LayerControlPanel";
+import ChatPanel, { ChatMessage } from "./ChatPanel";
 
 type LayerId = "plankton" | "sst" | "swot" | "sharks" | "predictions";
 
@@ -286,7 +287,9 @@ export default function GlobeApp() {
   const [sstRange, setSstRange] = useState({ min: 0, max: 1 });
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
   const [isSpeciesModalOpen, setSpeciesModalOpen] = useState(false);
-  const [selectedPredictionSpecies, setSelectedPredictionSpecies] = useState<string[]>([]);
+  const [selectedPredictionSpecies, setSelectedPredictionSpecies] = useState<
+    string[]
+  >([]);
   const [isPredictionModalOpen, setPredictionModalOpen] = useState(false);
   const [predictionSpeciesCache, setPredictionSpeciesCache] = useState<
     Record<string, DataPoint[]>
@@ -301,6 +304,17 @@ export default function GlobeApp() {
     sharks: false,
     predictions: false,
   });
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content:
+        "Olá! Posso ajustar camadas, filtros ou responder dúvidas sobre o globo. Pergunte à vontade.",
+      timestamp: new Date().toISOString(),
+    },
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [isChatSending, setIsChatSending] = useState(false);
 
   const setDatasetLoading = useCallback(
     (key: keyof typeof loadingState, value: boolean) => {
@@ -366,34 +380,37 @@ export default function GlobeApp() {
     []
   );
 
-  const fetchCsvData = useCallback(async (sources: string[]): Promise<DataPoint[]> => {
-    for (const source of sources) {
-      try {
-        const requestUrl = resolveSourceUrl(source);
-        const isRemote = requestUrl.startsWith("http");
-        const response = await fetch(requestUrl, {
-          mode: isRemote ? "cors" : "same-origin",
-        });
+  const fetchCsvData = useCallback(
+    async (sources: string[]): Promise<DataPoint[]> => {
+      for (const source of sources) {
+        try {
+          const requestUrl = resolveSourceUrl(source);
+          const isRemote = requestUrl.startsWith("http");
+          const response = await fetch(requestUrl, {
+            mode: isRemote ? "cors" : "same-origin",
+          });
 
-        if (!response.ok) {
-          continue;
-        }
+          if (!response.ok) {
+            continue;
+          }
 
-        const text = await response.text();
-        const parsed = normalizeCsvRows(parseCsvText(text));
+          const text = await response.text();
+          const parsed = normalizeCsvRows(parseCsvText(text));
 
-        if (parsed.length) {
-          return parsed;
-        }
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.warn(`Falha ao carregar CSV de ${source}`, error);
+          if (parsed.length) {
+            return parsed;
+          }
+        } catch (error) {
+          if (import.meta.env.DEV) {
+            console.warn(`Falha ao carregar CSV de ${source}`, error);
+          }
         }
       }
-    }
 
-    return [];
-  }, []);
+      return [];
+    },
+    []
+  );
 
   const loadCSV = useCallback(
     async (
@@ -415,11 +432,9 @@ export default function GlobeApp() {
       setPlanktonData,
       { loadingKey: "plankton" }
     );
-    void loadCSV(
-      [REMOTE_SOURCES.sst, "/data/sst_20241117.csv"],
-      setSstData,
-      { loadingKey: "sst" }
-    );
+    void loadCSV([REMOTE_SOURCES.sst, "/data/sst_20241117.csv"], setSstData, {
+      loadingKey: "sst",
+    });
     void loadCSV(
       [REMOTE_SOURCES.swot, "/data/swot_20251001.csv"],
       setSwotData,
@@ -475,7 +490,10 @@ export default function GlobeApp() {
   }, [sharksData]);
 
   const predictionSpecies = useMemo(
-    () => Object.keys(PREDICTION_SPECIES_SOURCES).sort((a, b) => a.localeCompare(b)),
+    () =>
+      Object.keys(PREDICTION_SPECIES_SOURCES).sort((a, b) =>
+        a.localeCompare(b)
+      ),
     []
   );
 
@@ -501,7 +519,10 @@ export default function GlobeApp() {
 
   useEffect(() => {
     selectedPredictionSpecies.forEach((species) => {
-      if (predictionSpeciesCache[species] || predictionSpeciesLoading[species]) {
+      if (
+        predictionSpeciesCache[species] ||
+        predictionSpeciesLoading[species]
+      ) {
         return;
       }
 
@@ -510,12 +531,12 @@ export default function GlobeApp() {
 
       setPredictionSpeciesLoading((prev) => ({ ...prev, [species]: true }));
       fetchCsvData([source]).then((rows) => {
-      setPredictionSpeciesCache((prev) => ({ ...prev, [species]: rows }));
-      setPredictionSpeciesLoading((prev) => ({ ...prev, [species]: false }));
-      if (!rows.length && import.meta.env.DEV) {
-        console.warn(`Sem dados retornados para a espécie ${species}`);
-      }
-    });
+        setPredictionSpeciesCache((prev) => ({ ...prev, [species]: rows }));
+        setPredictionSpeciesLoading((prev) => ({ ...prev, [species]: false }));
+        if (!rows.length && import.meta.env.DEV) {
+          console.warn(`Sem dados retornados para a espécie ${species}`);
+        }
+      });
     });
   }, [
     selectedPredictionSpecies,
@@ -567,6 +588,33 @@ export default function GlobeApp() {
     return `${selectedPredictionSpecies.length} species selected`;
   }, [selectedPredictionSpecies]);
 
+  const handleSendChat = useCallback(() => {
+    const trimmed = chatInput.trim();
+    if (!trimmed) return;
+
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: trimmed,
+      timestamp: new Date().toISOString(),
+    };
+    setChatMessages((prev) => [...prev.slice(-19), userMessage]);
+    setChatInput("");
+    setIsChatSending(true);
+
+    setTimeout(() => {
+      const assistantMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content:
+          "Ainda não estou conectado a uma LLM. Em breve vou conseguir aplicar comandos no globo automaticamente.",
+        timestamp: new Date().toISOString(),
+      };
+      setChatMessages((prev) => [...prev.slice(-19), assistantMessage]);
+      setIsChatSending(false);
+    }, 600);
+  }, [chatInput]);
+
   const deckLayers = useMemo(() => {
     const arr: any[] = [];
 
@@ -579,7 +627,7 @@ export default function GlobeApp() {
           data: planktonData,
           getPolygon: (d) =>
             typeof d.h3 === "string" && h3.isValidCell(d.h3)
-              ? h3.cellToBoundary(d.h3, true).map(([lat, lon]) => [lon, lat])
+              ? h3.cellToBoundary(d.h3, true).map(([lat, lon]) => [lat, lon])
               : null,
           getFillColor: [r, g, b, 200],
           getLineColor: [r, g, b, 220],
@@ -693,17 +741,59 @@ export default function GlobeApp() {
         overflow: "hidden",
       }}
     >
-      <LayerControlPanel
-        layers={layers}
-        onToggleLayer={handleToggleLayer}
-        onOpacityChange={handleOpacityChange}
-        onOpenSpeciesFilter={() => setSpeciesModalOpen(true)}
-        hasSpeciesFilter={sharkSpecies.length > 0}
-        onOpenPredictionFilter={() => setPredictionModalOpen(true)}
-        hasPredictionFilter={predictionSpecies.length > 0}
-        predictionFilterLabel={predictionFilterLabel}
-        loadingState={loadingState}
-      />
+      <div className="flex h-full w-full">
+        <div className="relative flex-1 px-4 pb-4 pt-24 xl:px-10 xl:pb-10">
+          <LayerControlPanel
+            className="xl:hidden absolute left-6 top-24 z-10 w-80"
+            layers={layers}
+            onToggleLayer={handleToggleLayer}
+            onOpacityChange={handleOpacityChange}
+            onOpenSpeciesFilter={() => setSpeciesModalOpen(true)}
+            hasSpeciesFilter={sharkSpecies.length > 0}
+            onOpenPredictionFilter={() => setPredictionModalOpen(true)}
+            hasPredictionFilter={predictionSpecies.length > 0}
+            predictionFilterLabel={predictionFilterLabel}
+            loadingState={loadingState}
+          />
+          <div className="relative h-full w-full">
+            <div className="absolute left-6 top-6 z-20 hidden xl:block w-[300px]">
+              <LayerControlPanel
+                className="w-full"
+                layers={layers}
+                onToggleLayer={handleToggleLayer}
+                onOpacityChange={handleOpacityChange}
+                onOpenSpeciesFilter={() => setSpeciesModalOpen(true)}
+                hasSpeciesFilter={sharkSpecies.length > 0}
+                onOpenPredictionFilter={() => setPredictionModalOpen(true)}
+                hasPredictionFilter={predictionSpecies.length > 0}
+                predictionFilterLabel={predictionFilterLabel}
+                loadingState={loadingState}
+              />
+            </div>
+            <Map
+              reuseMaps
+              projection="globe"
+              initialViewState={INITIAL_VIEW_STATE}
+              mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+              style={{ width: "100%", height: "100%" }}
+            >
+              <DeckGLOverlay
+                layers={deckLayers}
+                getTooltip={getTooltip}
+                interleaved
+              />
+            </Map>
+          </div>
+        </div>
+
+        <ChatPanel
+          messages={chatMessages}
+          inputValue={chatInput}
+          onChangeInput={setChatInput}
+          onSend={handleSendChat}
+          isSending={isChatSending}
+        />
+      </div>
       {sharkSpecies.length > 0 && isSpeciesModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="w-[90vw] max-w-xl bg-slate-900/95 border border-cyan-500/40 rounded-2xl shadow-2xl text-slate-100 overflow-hidden">
@@ -831,7 +921,9 @@ export default function GlobeApp() {
               {predictionSpecies.map((species) => {
                 const checked = selectedPredictionSpecies.includes(species);
                 const loading = predictionSpeciesLoading[species];
-                const hasData = Boolean(predictionSpeciesCache[species]?.length);
+                const hasData = Boolean(
+                  predictionSpeciesCache[species]?.length
+                );
                 return (
                   <label
                     key={species}
@@ -893,19 +985,6 @@ export default function GlobeApp() {
           </div>
         </div>
       )}
-      <Map
-        reuseMaps
-        projection="globe"
-        initialViewState={INITIAL_VIEW_STATE}
-        mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
-        style={{ width: "100%", height: "100%" }}
-      >
-        <DeckGLOverlay
-          layers={deckLayers}
-          getTooltip={getTooltip}
-          interleaved
-        />
-      </Map>
     </div>
   );
 }

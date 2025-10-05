@@ -19,6 +19,7 @@ interface LayerControlPanelProps<T extends string = string> {
   hasPredictionFilter?: boolean;
   predictionFilterLabel?: string;
   loadingState?: Partial<Record<T, boolean>>;
+  className?: string;
 }
 
 export default function LayerControlPanel<T extends string>({
@@ -31,13 +32,15 @@ export default function LayerControlPanel<T extends string>({
   hasPredictionFilter,
   predictionFilterLabel,
   loadingState,
+  className,
 }: LayerControlPanelProps<T>) {
+  const containerClass = className ?? "absolute left-6 top-24 z-10 w-80";
   return (
     <motion.div
       initial={{ x: -300, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       transition={{ duration: 0.5, delay: 0.3 }}
-      className="absolute left-6 top-24 z-10 w-80"
+      className={containerClass}
     >
       <div className="backdrop-blur-md bg-slate-900/90 rounded-2xl border border-cyan-500/30 shadow-2xl overflow-hidden">
         <div className="bg-gradient-to-r from-cyan-600 to-blue-600 px-6 py-4">
