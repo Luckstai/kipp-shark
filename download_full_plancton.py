@@ -36,7 +36,8 @@ except Exception as _e:
 # =========================
 # CONFIGURAÇÕES
 # =========================
-SHORT_NAME = "MODISA_L3m_CHL_NRT"   # Dataset NRT diário
+# SHORT_NAME = "MODISA_L3m_CHL_NRT"   # Dataset NRT diário
+SHORT_NAME = "MODISA_L3m_CHL"   # Dataset NRT diário
 GRANULE_NAME = "*DAY*.4km*"         # filtro do granule: diário + 4km
 PROVIDER = "OB_CLOUD"
 
@@ -48,7 +49,7 @@ NC_DIR = BASE_DIR / "nc"
 CSV_DIR = BASE_DIR / "csv"
 
 # Downsample só é aplicado quando NÃO usamos H3 agregado.
-DOWNSAMPLE = 8
+DOWNSAMPLE = 1
 
 # H3: escolha a resolução (5–7 normalmente funciona bem para ~4km)
 H3_RESOLUTION = 5
