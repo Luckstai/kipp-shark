@@ -1,6 +1,12 @@
-import { useRef } from "react";
+import { useRef, Suspense, useEffect } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
+import {
+  OrbitControls,
+  PerspectiveCamera,
+  useGLTF,
+  useAnimations,
+  Html,
+} from "@react-three/drei";
 import { motion } from "framer-motion";
 import {
   Thermometer,
@@ -11,84 +17,54 @@ import {
 } from "lucide-react";
 import * as THREE from "three";
 
+// 🦈 Modelo 3D do tubarão com animação
 function SharkModel() {
   const sharkRef = useRef<THREE.Group>(null);
+  const { scene, animations } = useGLTF("/models/shark.glb");
+  const { actions, mixer } = useAnimations(animations, sharkRef);
+
+  useEffect(() => {
+    // Centraliza e escala
+    const box = new THREE.Box3().setFromObject(scene);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+
+    const scaleFactor = 5 / Math.max(size.x, size.y, size.z);
+    scene.scale.setScalar(scaleFactor);
+    scene.position.sub(center.multiplyScalar(scaleFactor));
+
+    // Animação contínua e fluida
+    if (animations && animations.length > 0) {
+      const firstAction = actions[animations[0].name];
+      if (firstAction) {
+        firstAction.reset();
+        firstAction.setLoop(THREE.LoopRepeat, Infinity);
+        firstAction.clampWhenFinished = false;
+        firstAction.fadeIn(0.8);
+        firstAction.play();
+        mixer.timeScale = 1;
+      }
+    }
+
+    return () => mixer.stopAllAction();
+  }, [scene, animations, actions, mixer]);
+
+  useFrame((_, delta) => mixer?.update(delta));
 
   useFrame((state) => {
     if (sharkRef.current) {
       sharkRef.current.rotation.y =
-        Math.sin(state.clock.elapsedTime * 0.3) * 0.2;
+        Math.sin(state.clock.elapsedTime * 0.3) * 0.3;
+      sharkRef.current.position.y =
+        Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
     }
   });
 
   return (
     <group ref={sharkRef}>
-      <mesh position={[0, 0, 0]} castShadow>
-        <cylinderGeometry args={[0.3, 0.5, 3, 32]} />
-        <meshStandardMaterial color="#4a5568" metalness={0.6} roughness={0.4} />
-      </mesh>
-
-      <mesh position={[0, 0, 1.8]} castShadow>
-        <coneGeometry args={[0.3, 0.8, 32]} />
-        <meshStandardMaterial color="#4a5568" metalness={0.6} roughness={0.4} />
-      </mesh>
-
-      <mesh position={[0, 0.6, 0]} rotation={[0, 0, Math.PI / 6]} castShadow>
-        <coneGeometry args={[0.3, 1, 16]} />
-        <meshStandardMaterial color="#2d3748" metalness={0.5} roughness={0.5} />
-      </mesh>
-
-      <mesh
-        position={[0.6, -0.1, 0.5]}
-        rotation={[0, 0, -Math.PI / 3]}
-        castShadow
-      >
-        <boxGeometry args={[0.1, 0.8, 0.3]} />
-        <meshStandardMaterial color="#2d3748" metalness={0.5} roughness={0.5} />
-      </mesh>
-
-      <mesh
-        position={[-0.6, -0.1, 0.5]}
-        rotation={[0, 0, Math.PI / 3]}
-        castShadow
-      >
-        <boxGeometry args={[0.1, 0.8, 0.3]} />
-        <meshStandardMaterial color="#2d3748" metalness={0.5} roughness={0.5} />
-      </mesh>
-
-      <mesh position={[0, 0, -1.5]} rotation={[0, Math.PI / 4, 0]} castShadow>
-        <coneGeometry args={[0.4, 0.8, 3]} />
-        <meshStandardMaterial color="#2d3748" metalness={0.5} roughness={0.5} />
-      </mesh>
-
-      <mesh position={[0, 0.3, 0.3]} castShadow>
-        <boxGeometry args={[0.4, 0.15, 0.4]} />
-        <meshStandardMaterial
-          color="#06b6d4"
-          metalness={0.8}
-          roughness={0.2}
-          emissive="#06b6d4"
-          emissiveIntensity={0.3}
-        />
-      </mesh>
-
-      <mesh position={[0.15, 0.35, 0.5]}>
-        <sphereGeometry args={[0.05, 16, 16]} />
-        <meshStandardMaterial
-          color="#fbbf24"
-          emissive="#fbbf24"
-          emissiveIntensity={0.8}
-        />
-      </mesh>
-
-      <mesh position={[-0.15, 0.35, 0.5]}>
-        <sphereGeometry args={[0.05, 16, 16]} />
-        <meshStandardMaterial
-          color="#fbbf24"
-          emissive="#fbbf24"
-          emissiveIntensity={0.8}
-        />
-      </mesh>
+      <primitive object={scene} />
     </group>
   );
 }
@@ -103,32 +79,32 @@ export default function Shark3DView() {
       position: "top-20 left-10",
     },
     {
-      icon: Ruler,
-      name: "Depth",
-      desc: "Tracks dive depth and movement",
-      color: "from-blue-500 to-cyan-500",
-      position: "top-40 right-10",
-    },
-    {
       icon: Activity,
       name: "Acceleration",
       desc: "Detects hunting activity",
       color: "from-purple-500 to-pink-500",
-      position: "bottom-40 left-10",
+      position: "top-[240px] left-10", // ⬇️ leve ajuste
     },
     {
-      icon: FishIcon,
-      name: "Prey Analysis",
-      desc: "Detects what the shark is eating",
-      color: "from-green-500 to-emerald-500",
-      position: "bottom-20 right-10",
+      icon: Ruler,
+      name: "Depth",
+      desc: "Tracks dive depth and movement",
+      color: "from-blue-500 to-cyan-500",
+      position: "top-20 right-10",
     },
     {
       icon: Satellite,
       name: "GPS",
       desc: "Tracks migration and patterns",
       color: "from-yellow-500 to-amber-500",
-      position: "top-1/2 right-20",
+      position: "top-[240px] right-10", // ⬇️ ajustado
+    },
+    {
+      icon: FishIcon,
+      name: "Prey Analysis",
+      desc: "Detects what the shark is eating",
+      color: "from-green-500 to-emerald-500",
+      position: "top-[460px] right-10", // ⬇️ mais afastado
     },
   ];
 
@@ -146,7 +122,7 @@ export default function Shark3DView() {
           </h2>
           <p className="text-xl text-slate-300 max-w-3xl mx-auto">
             By understanding what sharks eat, where they go, and how they
-            behave, we can protect marine life and preserve ocean balance
+            behave, we can protect marine life and preserve ocean balance.
           </p>
         </motion.div>
 
@@ -158,49 +134,55 @@ export default function Shark3DView() {
             className="backdrop-blur-md bg-slate-900/40 rounded-3xl border border-cyan-500/30 shadow-2xl overflow-hidden"
             style={{ height: "600px" }}
           >
-            <Canvas shadows>
-              <PerspectiveCamera makeDefault position={[0, 2, 6]} />
+            <Canvas
+              shadows
+              gl={{ antialias: true }}
+              onCreated={({ scene }) => {
+                scene.background = new THREE.Color("#0b1225");
+                scene.fog = new THREE.Fog("#0b1225", 10, 40);
+              }}
+            >
+              <PerspectiveCamera makeDefault position={[0, 1.5, 5.2]} />
               <OrbitControls
                 enablePan={false}
-                minDistance={4}
-                maxDistance={10}
+                minDistance={3}
+                maxDistance={15}
                 autoRotate
-                autoRotateSpeed={1}
+                autoRotateSpeed={0.6}
               />
 
-              <ambientLight intensity={0.5} />
+              <ambientLight intensity={1.1} />
               <directionalLight
-                position={[5, 5, 5]}
-                intensity={1}
+                position={[5, 10, 5]}
+                intensity={2}
                 castShadow
-                shadow-mapSize-width={1024}
-                shadow-mapSize-height={1024}
               />
+              <hemisphereLight intensity={0.8} groundColor="#0f172a" />
               <pointLight
-                position={[-5, 5, -5]}
-                intensity={0.5}
-                color="#06b6d4"
-              />
-              <pointLight
-                position={[0, -2, 0]}
-                intensity={0.3}
-                color="#0ea5e9"
+                position={[-10, 10, -10]}
+                intensity={1.2}
+                color="#00ffff"
               />
 
-              <SharkModel />
+              <Suspense
+                fallback={
+                  <Html center>
+                    <p className="text-cyan-400 font-medium animate-pulse">
+                      🦈 Loading shark model...
+                    </p>
+                  </Html>
+                }
+              >
+                <SharkModel />
+              </Suspense>
 
               <mesh
                 receiveShadow
                 rotation={[-Math.PI / 2, 0, 0]}
-                position={[0, -2, 0]}
+                position={[0, -3, 0]}
               >
-                <planeGeometry args={[20, 20]} />
-                <shadowMaterial opacity={0.3} />
-              </mesh>
-
-              <mesh position={[0, 0, -8]}>
-                <planeGeometry args={[20, 15]} />
-                <meshBasicMaterial color="#0f172a" />
+                <planeGeometry args={[30, 30]} />
+                <shadowMaterial opacity={0.2} />
               </mesh>
             </Canvas>
 
@@ -211,6 +193,7 @@ export default function Shark3DView() {
             </div>
           </motion.div>
 
+          {/* Sensores ajustados */}
           {sensors.map((sensor, index) => {
             const Icon = sensor.icon;
             return (
@@ -242,33 +225,6 @@ export default function Shark3DView() {
         </div>
 
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.4, duration: 0.8 }}
-          className="mt-12 grid md:grid-cols-2 lg:grid-cols-5 gap-4"
-        >
-          {sensors.map((sensor, index) => {
-            const Icon = sensor.icon;
-            return (
-              <div
-                key={sensor.name}
-                className="backdrop-blur-md bg-slate-800/40 rounded-xl p-4 border border-slate-700/50 lg:hidden"
-              >
-                <div
-                  className={`w-10 h-10 rounded-full bg-gradient-to-br ${sensor.color} flex items-center justify-center mb-2`}
-                >
-                  <Icon className="w-5 h-5 text-white" />
-                </div>
-                <h4 className="text-white font-semibold text-sm mb-1">
-                  {sensor.name}
-                </h4>
-                <p className="text-slate-300 text-xs">{sensor.desc}</p>
-              </div>
-            );
-          })}
-        </motion.div>
-
-        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1.6, duration: 0.8 }}
@@ -280,12 +236,13 @@ export default function Shark3DView() {
           <p className="text-slate-300 text-center max-w-3xl mx-auto leading-relaxed">
             Our Smart Tag technology combines cutting-edge sensors with
             satellite communication to provide real-time insights into shark
-            behavior, migration patterns, and ecosystem health. This data helps
-            scientists make informed decisions to protect these essential apex
-            predators and maintain the delicate balance of our oceans.
+            behavior, migration patterns, and ecosystem health.
           </p>
         </motion.div>
       </div>
     </div>
   );
 }
+
+// Precarrega o modelo
+useGLTF.preload("/models/shark.glb");
