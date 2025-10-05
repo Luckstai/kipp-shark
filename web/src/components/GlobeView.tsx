@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Map, useControl } from "react-map-gl/maplibre";
 import type { ViewState } from "react-map-gl/maplibre";
@@ -23,8 +23,17 @@ type LayerConfig = {
 
 type DataPoint = { [key: string]: any };
 
-const PREDICTIONS_URL =
-  "https://source-bucket-kipp.s3.us-west-2.amazonaws.com/hackathon-nasa-2025/sharks-prediction/predictions.csv";
+const s3Domain = "https://source-bucket-kipp.s3.us-west-2.amazonaws.com";
+const s3BucketName = "hackathon-nasa-2025";
+const s3Bucket = `${s3Domain}/${s3BucketName}`;
+
+const REMOTE_SOURCES = {
+  plankton: `${s3Bucket}/planktons/AQUA_MODIS.20250101_20250131.L3m.MO.CHL.chlor_a.9km.h3r5.csv`,
+  sst: `${s3Bucket}/sst/AQUA_MODIS.20250101_20250131.L3m.MO.SST.sst.9km.h3r5.csv`,
+  swot: `${s3Bucket}/swot/swot_20251001.csv`,
+  sharks: `${s3Bucket}/sharks/shark_full/sharks_h3r5_2015-01-01_2025-01-01.csv`,
+  predictions: `${s3Bucket}/sharks-prediction/predictions.csv`,
+} as const;
 
 const CORS_PROXY = (import.meta.env.VITE_CORS_PROXY ?? "").trim();
 
@@ -42,6 +51,7 @@ const INITIAL_VIEW_STATE: ViewState = {
   zoom: 1.6,
   pitch: 0,
   bearing: 0,
+  padding: { top: 0, right: 0, bottom: 0, left: 0 },
 };
 
 const hexToRgb = (hex: string): [number, number, number] => {
@@ -104,7 +114,8 @@ const interpolateGradientColor = (
     const next = stops[i + 1];
     if (clampedT >= current.t && clampedT <= next.t) {
       const localT =
-        (clampedT - current.t) / (next.t - current.t === 0 ? 1 : next.t - current.t);
+        (clampedT - current.t) /
+        (next.t - current.t === 0 ? 1 : next.t - current.t);
       const r = Math.round(
         current.color[0] + (next.color[0] - current.color[0]) * localT
       );
@@ -134,7 +145,10 @@ const getSstColor = (
   return [r, g, b, 220];
 };
 
-const getSstElevation = (value: number, range: { min: number; max: number }) => {
+const getSstElevation = (
+  value: number,
+  range: { min: number; max: number }
+) => {
   if (!Number.isFinite(value)) return 0;
   const span = range.max - range.min;
   const normalized = span === 0 ? 0 : (value - range.min) / span;
@@ -142,7 +156,9 @@ const getSstElevation = (value: number, range: { min: number; max: number }) => 
   return clamped * 60000;
 };
 
-const getPredictionColor = (value: number): [number, number, number, number] => {
+const getPredictionColor = (
+  value: number
+): [number, number, number, number] => {
   if (!Number.isFinite(value)) {
     return [13, 148, 136, 200];
   }
@@ -182,12 +198,16 @@ const normalizeCsvRows = (rows: DataPoint[]): DataPoint[] =>
 
       if (typeof h3field === "string" && h3field.length) {
         row.h3 = h3field;
-        try {
-          const [lat, lon] = h3.cellToLatLng(h3field);
-          if (!Number.isFinite(row.latitude)) row.latitude = lat;
-          if (!Number.isFinite(row.longitude)) row.longitude = lon;
-        } catch (error) {
-          // continue silently if H3 is invalid
+        if (h3.isValidCell(h3field)) {
+          try {
+            const [lat, lon] = h3.cellToLatLng(h3field);
+            if (!Number.isFinite(row.latitude)) row.latitude = lat;
+            if (!Number.isFinite(row.longitude)) row.longitude = lon;
+          } catch (error) {
+            // ignore conversion issues but keep row
+          }
+        } else {
+          delete row.h3;
         }
       }
 
@@ -226,7 +246,10 @@ const normalizeCsvRows = (rows: DataPoint[]): DataPoint[] =>
       return row;
     })
     .filter((row) => {
-      const hasH3 = typeof row.h3 === "string" && row.h3.length > 0;
+      const hasH3 =
+        typeof row.h3 === "string" &&
+        row.h3.length > 0 &&
+        h3.isValidCell(row.h3);
       const hasCoords =
         Number.isFinite(row.latitude) &&
         Number.isFinite(row.longitude) &&
@@ -295,13 +318,16 @@ export default function GlobeApp() {
     );
   }, []);
 
-  const handleOpacityChange = useCallback((layerId: LayerId, opacity: number) => {
-    setLayers((prev) =>
-      prev.map((layer) =>
-        layer.id === layerId ? { ...layer, opacity } : layer
-      )
-    );
-  }, []);
+  const handleOpacityChange = useCallback(
+    (layerId: LayerId, opacity: number) => {
+      setLayers((prev) =>
+        prev.map((layer) =>
+          layer.id === layerId ? { ...layer, opacity } : layer
+        )
+      );
+    },
+    []
+  );
 
   const loadCSV = useCallback(
     async (sources: string[], setter: (rows: DataPoint[]) => void) => {
@@ -338,11 +364,20 @@ export default function GlobeApp() {
   );
 
   useEffect(() => {
-    void loadCSV(["/data/plancton_20241117.csv"], setPlanktonData);
-    void loadCSV(["/data/sst_20241117.csv"], setSstData);
-    void loadCSV(["/data/swot_20251001.csv"], setSwotData);
-    void loadCSV(["/data/sharks_20241117.csv"], setSharksData);
-    void loadCSV([PREDICTIONS_URL, "/data/predictions.csv"], setPredData);
+    void loadCSV(
+      [REMOTE_SOURCES.plankton, "/data/plancton_20241117.csv"],
+      setPlanktonData
+    );
+    void loadCSV([REMOTE_SOURCES.sst, "/data/sst_20241117.csv"], setSstData);
+    void loadCSV([REMOTE_SOURCES.swot, "/data/swot_20251001.csv"], setSwotData);
+    void loadCSV(
+      [REMOTE_SOURCES.sharks, "/data/sharks_20241117.csv"],
+      setSharksData
+    );
+    void loadCSV(
+      [REMOTE_SOURCES.predictions, "/data/predictions.csv"],
+      setPredData
+    );
   }, [loadCSV]);
 
   useEffect(() => {
@@ -404,7 +439,7 @@ export default function GlobeApp() {
           id: "plankton-h3",
           data: planktonData,
           getPolygon: (d) =>
-            d.h3
+            typeof d.h3 === "string" && h3.isValidCell(d.h3)
               ? h3.cellToBoundary(d.h3, true).map(([lat, lon]) => [lon, lat])
               : null,
           getFillColor: [r, g, b, 200],
@@ -483,7 +518,8 @@ export default function GlobeApp() {
           data: predData,
           opacity: predCfg.opacity,
           pickable: true,
-          getHexagon: (d) => d.h3,
+          getHexagon: (d) =>
+            typeof d.h3 === "string" && h3.isValidCell(d.h3) ? d.h3 : null,
           getFillColor: (d) =>
             getPredictionColor(Number(d.probability ?? d.prediction)),
           getElevation: (d) =>
