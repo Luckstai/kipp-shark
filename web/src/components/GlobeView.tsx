@@ -325,17 +325,31 @@ export default function GlobeApp() {
 
   const [layers, setLayers] = useState<LayerConfig[]>([
     {
+      id: "predictions",
+      name: "Predicted Zones",
+      color: "#4575b4",
+      enabled: true,
+      opacity: 0.55,
+    },
+    {
+      id: "sharks",
+      name: "Shark Occurrences",
+      color: "#f1c40f",
+      enabled: false,
+      opacity: 1.0,
+    },
+    {
       id: "plankton",
       name: "Plankton (Chlorophyll)",
       color: "#1a9850",
-      enabled: true,
+      enabled: false,
       opacity: 0.85,
     },
     {
       id: "sst",
       name: "Sea Surface Temperature",
       color: "#d73027",
-      enabled: true,
+      enabled: false,
       opacity: 0.75,
     },
     {
@@ -344,20 +358,6 @@ export default function GlobeApp() {
       color: "#fdae61",
       enabled: false,
       opacity: 0.85,
-    },
-    {
-      id: "sharks",
-      name: "Shark Occurrences",
-      color: "#f1c40f",
-      enabled: true,
-      opacity: 1.0,
-    },
-    {
-      id: "predictions",
-      name: "Predicted Zones",
-      color: "#4575b4",
-      enabled: false,
-      opacity: 0.55,
     },
   ]);
 
@@ -755,7 +755,7 @@ export default function GlobeApp() {
             predictionFilterLabel={predictionFilterLabel}
             loadingState={loadingState}
           />
-          <div className="relative h-full w-full">
+          <div className="relative h-full w-full rounded-3xl border border-cyan-500/20 bg-slate-950/20 shadow-[0_0_40px_rgba(0,255,255,0.08)]">
             <div className="absolute left-6 top-6 z-20 hidden xl:block w-[300px]">
               <LayerControlPanel
                 className="w-full"
@@ -775,7 +775,7 @@ export default function GlobeApp() {
               projection="globe"
               initialViewState={INITIAL_VIEW_STATE}
               mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
-              style={{ width: "100%", height: "100%" }}
+              style={{ width: "100%", height: "100%", borderRadius: "24px" }}
             >
               <DeckGLOverlay
                 layers={deckLayers}
