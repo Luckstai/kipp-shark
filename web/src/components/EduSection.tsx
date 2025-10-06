@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { motion } from "framer-motion";
 import {
   Fish,
@@ -6,6 +7,7 @@ import {
   Wind,
   TrendingDown,
   ArrowRight,
+  ArrowDown,
   Globe,
 } from "lucide-react";
 
@@ -165,28 +167,36 @@ export default function EduSection({ onNavigate }: EduSectionProps) {
           <h3 className="text-3xl font-bold text-cyan-400 mb-8 text-center">
             The Marine Food Chain
           </h3>
-          <div className="flex flex-wrap justify-center items-center gap-6">
+          <div className="flex flex-col sm:flex-row sm:flex-nowrap justify-center items-center sm:items-stretch gap-6 sm:gap-8">
             {foodChain.map((item, index) => {
               const Icon = item.icon;
               return (
-                <motion.div
-                  key={item.name}
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.8 + index * 0.2 }}
-                  className="flex items-center gap-4"
-                >
-                  <div className="backdrop-blur-md bg-slate-800/40 rounded-xl p-6 border border-slate-700/50 text-center min-w-[160px]">
-                    <Icon className={`w-12 h-12 ${item.color} mx-auto mb-3`} />
-                    <h4 className="text-lg font-semibold text-white mb-1">
-                      {item.name}
-                    </h4>
-                    <p className="text-sm text-slate-400">{item.desc}</p>
-                  </div>
+                <Fragment key={item.name}>
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.8 + index * 0.2 }}
+                    className="flex flex-col items-center text-center sm:flex-shrink-0"
+                  >
+                    <div className="backdrop-blur-md bg-slate-800/40 rounded-xl border border-slate-700/50 p-6 w-full max-w-xs sm:w-56 min-h-[200px] flex flex-col justify-center">
+                      <Icon className={`w-12 h-12 ${item.color} mx-auto mb-3`} />
+                      <h4 className="text-lg font-semibold text-white mb-1">
+                        {item.name}
+                      </h4>
+                      <p className="text-sm text-slate-400">{item.desc}</p>
+                    </div>
+                  </motion.div>
                   {index < foodChain.length - 1 && (
-                    <ArrowRight className="w-8 h-8 text-cyan-500" />
+                    <div className="hidden sm:flex items-center justify-center text-cyan-500 flex-shrink-0">
+                      <ArrowRight size={32} />
+                    </div>
                   )}
-                </motion.div>
+                  {index < foodChain.length - 1 && (
+                    <div className="flex sm:hidden items-center justify-center text-cyan-500">
+                      <ArrowDown size={28} />
+                    </div>
+                  )}
+                </Fragment>
               );
             })}
           </div>

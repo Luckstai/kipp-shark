@@ -20,6 +20,7 @@ interface LayerControlPanelProps<T extends string = string> {
   predictionFilterLabel?: string;
   loadingState?: Partial<Record<T, boolean>>;
   className?: string;
+  disableInteractions?: boolean;
 }
 
 export default function LayerControlPanel<T extends string>({
@@ -33,6 +34,7 @@ export default function LayerControlPanel<T extends string>({
   predictionFilterLabel,
   loadingState,
   className,
+  disableInteractions,
 }: LayerControlPanelProps<T>) {
   const containerClass = className ?? "absolute left-6 top-24 z-10 w-80";
   return (
@@ -75,13 +77,18 @@ export default function LayerControlPanel<T extends string>({
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={() => onToggleLayer(layer.id)}
+                  disabled={
+                    Boolean(disableInteractions) ||
+                    Boolean(loadingState?.[layer.id])
+                  }
                   className={`p-2 rounded-lg transition-all duration-200 ${
                     layer.enabled
                       ? "bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30"
                       : "bg-slate-700/50 text-slate-500 hover:bg-slate-700"
-                  }`}
-                >
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                  >
                   {layer.enabled ? (
                     <Eye className="w-4 h-4" />
                   ) : (
@@ -120,6 +127,30 @@ export default function LayerControlPanel<T extends string>({
                     }
                     className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
                   />
+                  {layer.id === "sst" && (
+                    <div className="mt-3 space-y-1">
+                      <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-400">
+                        <span>Cooler</span>
+                        <span>Warmer</span>
+                      </div>
+                      <div className="h-2 w-full rounded-full" style={{
+                        background: "linear-gradient(90deg,#fff4a3,#ffd666,#ff9933,#c62828)",
+                        boxShadow: "0 0 8px rgba(255,153,51,0.35)",
+                      }} />
+                    </div>
+                  )}
+                  {layer.id === "plankton" && (
+                    <div className="mt-3 space-y-1">
+                      <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-400">
+                        <span>Low density</span>
+                        <span>High density</span>
+                      </div>
+                      <div className="h-2 w-full rounded-full" style={{
+                        background: "linear-gradient(90deg,#0f172a,#2563eb,#22c55e,#fbbf24,#f5f5f5)",
+                        boxShadow: "0 0 8px rgba(34,197,94,0.35)",
+                      }} />
+                    </div>
+                  )}
                   {layer.id === "sharks" && hasSpeciesFilter && onOpenSpeciesFilter && (
                     <button
                       type="button"

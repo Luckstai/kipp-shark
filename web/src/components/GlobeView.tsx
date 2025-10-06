@@ -510,14 +510,6 @@ export default function GlobeApp() {
     },
   ]);
 
-  const handleToggleLayer = useCallback((layerId: LayerId) => {
-    setLayers((prev) =>
-      prev.map((layer) =>
-        layer.id === layerId ? { ...layer, enabled: !layer.enabled } : layer
-      )
-    );
-  }, []);
-
   const handleOpacityChange = useCallback(
     (layerId: LayerId, opacity: number) => {
       setLayers((prev) =>
@@ -575,31 +567,82 @@ export default function GlobeApp() {
     [fetchCsvData, setDatasetLoading]
   );
 
+  const triggerLayerLoad = useCallback(
+    (layerId: LayerId) => {
+      if (loadingState[layerId]) return;
+      switch (layerId) {
+        case "plankton":
+          void loadCSV(
+            [REMOTE_SOURCES.plankton, "/data/plancton_20241117.csv"],
+            setPlanktonData,
+            { loadingKey: "plankton" }
+          );
+          break;
+        case "sst":
+          void loadCSV(
+            [REMOTE_SOURCES.sst, "/data/sst_20241117.csv"],
+            setSstData,
+            { loadingKey: "sst" }
+          );
+          break;
+        case "swot":
+          void loadCSV(
+            [REMOTE_SOURCES.swot, "/data/swot_20251001.csv"],
+            setSwotData,
+            { loadingKey: "swot" }
+          );
+          break;
+        case "sharks":
+          void loadCSV(
+            [REMOTE_SOURCES.sharks, "/data/sharks_20241117.csv"],
+            setSharksData,
+            { loadingKey: "sharks" }
+          );
+          break;
+        case "predictions":
+          void loadCSV(
+            [REMOTE_SOURCES.predictions, "/data/predictions.csv"],
+            setPredData,
+            { loadingKey: "predictions" }
+          );
+          break;
+        default:
+          break;
+      }
+    },
+    [loadCSV, loadingState]
+  );
+
+  const previousLayerEnabledRef = useRef<Record<LayerId, boolean>>({
+    plankton: false,
+    sst: false,
+    swot: false,
+    sharks: false,
+    predictions: false,
+  });
+
   useEffect(() => {
-    void loadCSV(
-      [REMOTE_SOURCES.plankton, "/data/plancton_20241117.csv"],
-      setPlanktonData,
-      { loadingKey: "plankton" }
-    );
-    void loadCSV([REMOTE_SOURCES.sst, "/data/sst_20241117.csv"], setSstData, {
-      loadingKey: "sst",
+    layers.forEach((layer) => {
+      const wasEnabled = previousLayerEnabledRef.current[layer.id];
+      if (layer.enabled && !wasEnabled) {
+        triggerLayerLoad(layer.id);
+      }
+      previousLayerEnabledRef.current[layer.id] = layer.enabled;
     });
-    void loadCSV(
-      [REMOTE_SOURCES.swot, "/data/swot_20251001.csv"],
-      setSwotData,
-      { loadingKey: "swot" }
+  }, [layers, triggerLayerLoad]);
+
+  const isAnyDatasetLoading = useMemo(
+    () => Object.values(loadingState).some(Boolean),
+    [loadingState]
+  );
+
+  const handleToggleLayer = useCallback((layerId: LayerId) => {
+    setLayers((prev) =>
+      prev.map((layer) =>
+        layer.id === layerId ? { ...layer, enabled: !layer.enabled } : layer
+      )
     );
-    void loadCSV(
-      [REMOTE_SOURCES.sharks, "/data/sharks_20241117.csv"],
-      setSharksData,
-      { loadingKey: "sharks" }
-    );
-    void loadCSV(
-      [REMOTE_SOURCES.predictions, "/data/predictions.csv"],
-      setPredData,
-      { loadingKey: "predictions" }
-    );
-  }, [loadCSV]);
+  }, []);
 
   useEffect(() => {
     if (!sstData.length) {
@@ -1290,6 +1333,7 @@ export default function GlobeApp() {
               hasPredictionFilter={predictionSpecies.length > 0}
               predictionFilterLabel={predictionFilterLabel}
               loadingState={loadingState}
+              disableInteractions={isAnyDatasetLoading}
             />
           </div>
 
@@ -1317,6 +1361,7 @@ export default function GlobeApp() {
             hasPredictionFilter={predictionSpecies.length > 0}
             predictionFilterLabel={predictionFilterLabel}
             loadingState={loadingState}
+            disableInteractions={isAnyDatasetLoading}
           />
         </div>
       </div>
