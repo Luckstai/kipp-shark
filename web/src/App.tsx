@@ -7,7 +7,7 @@ import Shark3DView from "./components/Shark3DView";
 import SimulatorSection from "./components/SimulatorSection";
 
 function App() {
-  const [currentSection, setCurrentSection] = useState("learn");
+  const [currentSection, setCurrentSection] = useState("explore");
 
   const handleNavigate = (section: string) => {
     setCurrentSection(section);
@@ -18,18 +18,6 @@ function App() {
       <Navbar currentSection={currentSection} onNavigate={handleNavigate} />
 
       <AnimatePresence mode="wait">
-        {currentSection === "learn" && (
-          <motion.div
-            key="learn"
-            initial={{ opacity: 0, x: -100 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 100 }}
-            transition={{ duration: 0.5 }}
-          >
-            <EduSection onNavigate={handleNavigate} />
-          </motion.div>
-        )}
-
         {currentSection === "explore" && (
           <motion.div
             key="explore"
@@ -39,6 +27,18 @@ function App() {
             transition={{ duration: 0.5 }}
           >
             <GlobeView />
+          </motion.div>
+        )}
+
+        {currentSection === "learn" && (
+          <motion.div
+            key="learn"
+            initial={{ opacity: 0, x: -100 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 100 }}
+            transition={{ duration: 0.5 }}
+          >
+            <EduSection onNavigate={handleNavigate} />
           </motion.div>
         )}
 

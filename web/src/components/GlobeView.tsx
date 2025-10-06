@@ -47,8 +47,7 @@ async function sendChatRequest(
     if (!response.ok) {
       return {
         mode: payload.mode,
-        reply:
-          "Não consegui processar sua solicitação. Tente novamente em instantes.",
+        reply: "I couldn't process your request. Please try again shortly.",
         commands: [],
       };
     }
@@ -66,7 +65,7 @@ async function mockChatApi(payload: ChatRequestPayload): Promise<ChatResponse> {
     return {
       mode: payload.mode,
       reply:
-        "Ativei a camada de previsões para Sphyrna e destaquei a costa brasileira.",
+        "I highlighted Sphyrna predictions along the Brazilian coast and adjusted the view for you.",
       commands: [
         { action: "toggle-layer", layerId: "predictions", enabled: true },
         { action: "toggle-layer", layerId: "sharks", enabled: false },
@@ -103,8 +102,7 @@ async function mockChatApi(payload: ChatRequestPayload): Promise<ChatResponse> {
   if (lower.includes("erro")) {
     return {
       mode: payload.mode,
-      reply:
-        "Não consegui processar sua solicitação. Tente novamente em instantes.",
+      reply: "I couldn't process your request. Please try again shortly.",
       commands: [],
     };
   }
@@ -113,8 +111,8 @@ async function mockChatApi(payload: ChatRequestPayload): Promise<ChatResponse> {
     mode: payload.mode,
     reply:
       payload.mode === "agent"
-        ? "Por enquanto sou um mock. Peça, por exemplo, para ver os tubarões previstos na costa do Brasil."
-        : "Sou um mock em modo chat. Posso responder perguntas gerais quando estiver conectado à IA real.",
+        ? "I'm a mock agent for now. Ask me to highlight predicted sharks along the Brazilian coast, for example."
+        : "I'm a mock chat assistant. Once the real AI is connected I'll answer any ocean questions you have.",
     commands: [],
   };
 }
@@ -445,7 +443,7 @@ export default function GlobeApp() {
       id: crypto.randomUUID(),
       role: "assistant",
       content:
-        "Olá! Posso ajustar camadas, filtros ou responder dúvidas sobre o globo. Pergunte à vontade.",
+        "Hi! I can tweak layers, filters, or explain the globe. Ask me anything to get started.",
       timestamp: new Date().toISOString(),
     },
   ]);
@@ -706,7 +704,7 @@ export default function GlobeApp() {
         setPredictionSpeciesCache((prev) => ({ ...prev, [species]: rows }));
         setPredictionSpeciesLoading((prev) => ({ ...prev, [species]: false }));
         if (!rows.length && import.meta.env.DEV) {
-          console.warn(`Sem dados retornados para a espécie ${species}`);
+          console.warn(`No data returned for species ${species}`);
         }
       });
     });
@@ -1053,7 +1051,7 @@ export default function GlobeApp() {
       .then((response) => {
         const replyText = response?.reply
           ? String(response.reply)
-          : "Não consegui processar sua solicitação. Tente novamente em instantes.";
+          : "I couldn't process your request. Please try again shortly.";
 
         const assistantMessage: ChatMessage = {
           id: crypto.randomUUID(),
@@ -1072,7 +1070,7 @@ export default function GlobeApp() {
           id: crypto.randomUUID(),
           role: "assistant",
           content:
-            "Não consegui processar sua solicitação. Tente novamente em instantes.",
+            "I couldn't process your request. Please try again shortly.",
           timestamp: new Date().toISOString(),
         };
         setChatMessages((prev) => [...prev.slice(-19), assistantMessage]);

@@ -40,7 +40,7 @@ export default function ChatPanel({
           <div>
             <h3 className="text-lg font-semibold text-cyan-300">Ocean Copilot</h3>
             <p className="text-xs text-slate-400 mt-1">
-              Converse em linguagem natural para ajustar o globo ou tirar dúvidas.
+              Chat in natural language to adjust the globe or ask questions.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -107,7 +107,7 @@ export default function ChatPanel({
         ))}
         {groupedMessages.length === 0 && (
           <p className="text-sm text-slate-400">
-            Envie uma pergunta ou comando para começar a conversar com o copiloto.
+            Send a question or command to start chatting with the copilot.
           </p>
         )}
       </div>
@@ -123,7 +123,7 @@ export default function ChatPanel({
           <textarea
             value={inputValue}
             onChange={(event) => onChangeInput(event.target.value)}
-            placeholder="Ex.: mostre apenas tubarões Sphyrna"
+            placeholder="E.g., show only Sphyrna sharks"
             rows={2}
             className="flex-1 resize-none bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
           />
@@ -142,7 +142,7 @@ export default function ChatPanel({
         </div>
         {isSending && (
           <p className="text-[11px] mt-2 text-cyan-300 uppercase tracking-wide">
-            pensando...
+            thinking...
           </p>
         )}
       </form>

@@ -9,8 +9,8 @@ export default function Navbar({ currentSection, onNavigate }: NavbarProps) {
   const isScrolled = false;
 
   const sections = [
-    { id: "learn", label: "Learn", icon: BookOpen },
     { id: "explore", label: "Explore", icon: Globe },
+    { id: "learn", label: "Learn", icon: BookOpen },
     { id: "simulator", label: "Prediction Engine", icon: LineChart },
     { id: "innovate", label: "Innovate", icon: Cpu },
   ];
