@@ -1,4 +1,4 @@
-import { Waves, BookOpen, Globe, Cpu } from "lucide-react";
+import { Waves, BookOpen, Globe, Cpu, LineChart } from "lucide-react";
 
 interface NavbarProps {
   currentSection: string;
@@ -11,6 +11,7 @@ export default function Navbar({ currentSection, onNavigate }: NavbarProps) {
   const sections = [
     { id: "learn", label: "Learn", icon: BookOpen },
     { id: "explore", label: "Explore", icon: Globe },
+    { id: "simulator", label: "Simulator", icon: LineChart },
     { id: "innovate", label: "Innovate", icon: Cpu },
   ];
 

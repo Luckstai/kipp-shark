@@ -1,4 +1,4 @@
-import { useRef, Suspense, useEffect } from "react";
+import { useRef, Suspense, useEffect, useLayoutEffect } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import {
   OrbitControls,
@@ -15,63 +15,267 @@ import {
   Fish as FishIcon,
   Satellite,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import * as THREE from "three";
 
-// 🦈 Modelo 3D do tubarão com animação
-type SensorCard = {
-  icon: LucideIcon;
+/* ==================== CONFIG ==================== */
+const SWIM_START = 0;
+const SWIM_END = 120;
+const SWIM_FPS = 24;
+
+/* ===== câmera inicial determinística e configurável ===== */
+function applyInitialCamera(
+  cam: THREE.PerspectiveCamera,
+  ctrls: any,
+  {
+    axis = "x", // 'x' ou 'z' → eixo pelo qual a câmera olha
+    sign = 1, //  1 ou -1   → lado do eixo
+    dist = 5.2,
+    height = 1.5,
+    target = new THREE.Vector3(0, 0.2, 0),
+  }: {
+    axis?: "x" | "z";
+    sign?: 1 | -1;
+    dist?: number;
+    height?: number;
+    target?: THREE.Vector3;
+  } = {}
+) {
+  const pos = new THREE.Vector3();
+  if (axis === "x") pos.set(sign * dist, height, 0);
+  else pos.set(0, height, sign * dist);
+
+  cam.position.copy(pos);
+  cam.lookAt(target);
+
+  ctrls.target.copy(target);
+  ctrls.update();
+  ctrls.saveState();
+}
+
+/* ========== filtro mínimo: remove só trilhas da cabeça ========== */
+function clipWithoutHead(clip: THREE.AnimationClip) {
+  const HEAD_TRACK_PREFIXES = [
+    "Head_Shark_Armature_3.",
+    "Head001_Shark_Armature_2.",
+    "CTRL_Head_Shark_Armature_38.",
+  ];
+  const filtered = clip.tracks.filter(
+    (t) => !HEAD_TRACK_PREFIXES.some((p) => t.name.startsWith(p))
+  );
+  (window as any).__filteredTracks = filtered.map((t) => t.name);
+  return new THREE.AnimationClip(
+    clip.name + "_noHead",
+    clip.duration,
+    filtered
+  );
+}
+
+/* ==================== LED blink robusto ==================== */
+function useBlink(scene: THREE.Object3D | null) {
+  const lightRef = useRef<THREE.PointLight | null>(null);
+  const meshRef = useRef<THREE.Mesh | null>(null);
+
+  useEffect(() => {
+    if (!scene) return;
+    let blink: THREE.Mesh | null =
+      (scene.getObjectByName("Blink") as THREE.Mesh) ?? null;
+    if (!blink) {
+      scene.traverse((o) => {
+        if (!blink && /blink/i.test(o.name) && (o as any).isMesh) {
+          blink = o as THREE.Mesh;
+        }
+      });
+    }
+    meshRef.current = blink ?? null;
+    if (!blink) {
+      console.warn("[Blink] nenhum objeto encontrado contendo 'blink'");
+      return;
+    }
+
+    const ensureStd = (m: THREE.Material) => {
+      if ((m as any).isMeshStandardMaterial)
+        return m as THREE.MeshStandardMaterial;
+      return new THREE.MeshStandardMaterial({
+        color: (m as any)?.color ?? 0x222222,
+      });
+    };
+    const orig = blink.material as THREE.Material | THREE.Material[];
+    let mat: THREE.MeshStandardMaterial;
+    if (Array.isArray(orig)) {
+      mat = ensureStd(orig[0]);
+      blink.material = mat;
+    } else {
+      mat = ensureStd(orig);
+      blink.material = mat;
+    }
+    mat.emissive = new THREE.Color(0xff0000);
+    mat.emissiveIntensity = 0.2;
+
+    if (!lightRef.current)
+      lightRef.current = new THREE.PointLight(0xff0000, 0, 1);
+    if (lightRef.current.parent !== blink) blink.add(lightRef.current);
+    if (blink.geometry) {
+      const center = new THREE.Vector3();
+      (blink.geometry as THREE.BufferGeometry).computeBoundingBox();
+      blink.geometry.boundingBox?.getCenter(center);
+      lightRef.current.position.copy(center);
+    }
+  }, [scene]);
+
+  useFrame(({ clock }) => {
+    const blink = meshRef.current;
+    const light = lightRef.current;
+    if (!blink || !light) return;
+    const t = clock.getElapsedTime();
+    const pulse = 0.5 + 0.5 * Math.sin(t * 2 * Math.PI); // 1 Hz
+    const mat = blink.material as THREE.MeshStandardMaterial;
+    if (mat) {
+      mat.emissive.set(0xff0000);
+      (mat as any).emissiveIntensity = 0.25 + pulse * 2.75;
+      mat.needsUpdate = true;
+    }
+    light.intensity = pulse * 2.0;
+    light.color.set(0xff0000);
+    light.distance = 0.9;
+  });
+}
+
+/* ==================== Sensor card ==================== */
+function SensorCard({
+  icon: Icon,
+  name,
+  desc,
+  color,
+}: {
+  icon: any;
   name: string;
   desc: string;
   color: string;
-  column: "left" | "right";
-};
+}) {
+  return (
+    <div className="backdrop-blur-md bg-slate-900/90 rounded-xl p-4 border border-cyan-500/30 shadow-xl max-w-[220px]">
+      <div
+        className={`w-12 h-12 rounded-full bg-gradient-to-br ${color} flex items-center justify-center mb-3`}
+      >
+        <Icon className="w-6 h-6 text-white" />
+      </div>
+      <h4 className="text-white font-semibold mb-1">{name}</h4>
+      <p className="text-slate-300 text-sm">{desc}</p>
+    </div>
+  );
+}
 
+/* ==================== Shark model ==================== */
 function SharkModel() {
   const sharkRef = useRef<THREE.Group>(null);
-  const { scene, animations } = useGLTF("/models/shark.glb");
-  const { actions, mixer } = useAnimations(animations, sharkRef);
+  const { scene, animations } = useGLTF("/models/shark_v5.glb");
+  const { mixer } = useAnimations(animations, sharkRef);
+
+  const HEAD_NAMES = [
+    "Head_Shark_Armature_3",
+    "Head001_Shark_Armature_2",
+    "CTRL_Head_Shark_Armature_38",
+  ];
+  const headBonesRef = useRef<(THREE.Bone | null)[]>([]);
+  const headPoseRef = useRef<
+    { q: THREE.Quaternion; p: THREE.Vector3 }[] | null
+  >(null);
 
   useEffect(() => {
-    // Centraliza e escala
-    const box = new THREE.Box3().setFromObject(scene);
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    box.getSize(size);
-    box.getCenter(center);
+    if (!animations?.length) return;
+    (window as any).__tracks = animations[0].tracks.map((t) => t.name);
+  }, [animations]);
 
-    const scaleFactor = 5 / Math.max(size.x, size.y, size.z);
-    scene.scale.setScalar(scaleFactor);
-    scene.position.sub(center.multiplyScalar(scaleFactor));
+  useEffect(() => {
+    if (!scene) return;
+    const bones: string[] = [];
+    scene.traverse((o) => {
+      if ((o as any).isBone) bones.push(o.name);
+    });
+    (window as any).__bones = bones;
+  }, [scene]);
 
-    // Animação contínua e fluida
-    if (animations && animations.length > 0) {
-      const firstAction = actions[animations[0].name];
-      if (firstAction) {
-        firstAction.reset();
-        firstAction.setLoop(THREE.LoopRepeat, Infinity);
-        firstAction.clampWhenFinished = false;
-        firstAction.fadeIn(0.8);
-        firstAction.play();
-        mixer.timeScale = 1;
-      }
+  useEffect(() => {
+    // centraliza/escala no group externo
+    const root = sharkRef.current;
+    if (root) {
+      const box = new THREE.Box3().setFromObject(scene);
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+      const k = 5 / Math.max(size.x, size.y, size.z);
+      root.scale.setScalar(k);
+      root.position.sub(center.multiplyScalar(k));
     }
 
-    return () => {
-      mixer?.stopAllAction();
-    };
-  }, [scene, animations, actions, mixer]);
+    if (animations && animations.length > 0) {
+      const base = animations[0];
+      const noHead = clipWithoutHead(base);
+      (window as any).__noHead = noHead;
 
-  useFrame((_, delta) => mixer?.update(delta));
+      let clipToPlay: THREE.AnimationClip = noHead;
+      if (SWIM_END > SWIM_START) {
+        const maybe = THREE.AnimationUtils.subclip(
+          noHead,
+          "SwimOnly",
+          SWIM_START,
+          SWIM_END,
+          SWIM_FPS
+        );
+        if (maybe.tracks.length > 0 && maybe.duration > 0) clipToPlay = maybe;
+        else console.warn("[Shark] subclip vazio — usando clipe inteiro.");
+      }
 
-  useFrame((state) => {
-    if (sharkRef.current) {
-      sharkRef.current.rotation.y =
-        Math.sin(state.clock.elapsedTime * 0.3) * 0.3;
-      sharkRef.current.position.y =
-        Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
+      mixer.stopAllAction();
+      const act = mixer.clipAction(clipToPlay, sharkRef.current ?? undefined);
+      act.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.5).play();
+      mixer.timeScale = 1;
+
+      headBonesRef.current = HEAD_NAMES.map(
+        (n) => (scene.getObjectByName(n) as THREE.Bone) || null
+      );
+
+      let raf = 0;
+      raf = requestAnimationFrame(() => {
+        headPoseRef.current = headBonesRef.current.map((b) => {
+          const q = new THREE.Quaternion();
+          const p = new THREE.Vector3();
+          if (b) {
+            q.copy(b.quaternion);
+            p.copy(b.position);
+          }
+          return { q, p };
+        });
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [scene, animations, mixer]);
+
+  useFrame((_, d) => mixer?.update(d));
+
+  // trava localmente a cabeça (pós-mixer)
+  useFrame(() => {
+    const bones = headBonesRef.current;
+    const pose = headPoseRef.current;
+    if (!bones.length || !pose) return;
+    for (let i = 0; i < bones.length; i++) {
+      const b = bones[i];
+      if (!b) continue;
+      b.quaternion.copy(pose[i].q);
+      b.position.copy(pose[i].p);
+      b.updateMatrixWorld(true);
     }
   });
+
+  // leve “vida” no group externo
+  useFrame((state) => {
+    if (!sharkRef.current) return;
+    sharkRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.3) * 0.3;
+    sharkRef.current.position.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
+  });
+
+  useBlink(scene);
 
   return (
     <group ref={sharkRef}>
@@ -81,72 +285,55 @@ function SharkModel() {
 }
 
 export default function Shark3DView() {
-  const sensors: SensorCard[] = [
+  /* ===== câmera determinística na frente (eixo X) ===== */
+  const camRef = useRef<THREE.PerspectiveCamera>(null);
+  const controlsRef = useRef<any>(null);
+
+  useLayoutEffect(() => {
+    if (!camRef.current || !controlsRef.current) return;
+    applyInitialCamera(camRef.current, controlsRef.current, {
+      axis: "z", // usa o eixo Z como frente
+      sign: 1, // 1 => +Z ; se ficar de costas, troque para -1
+      dist: 5.2, // distância
+      height: 0.8, // altura menor para não “olhar de cima”
+      target: new THREE.Vector3(0, 0.2, 0),
+    });
+  }, []);
+
+  const leftSensors = [
     {
       icon: Thermometer,
       name: "Temperature",
       desc: "Monitors water and body temperature",
       color: "from-red-500 to-orange-500",
-      column: "left" as const,
     },
     {
       icon: Activity,
       name: "Acceleration",
       desc: "Detects hunting activity",
       color: "from-purple-500 to-pink-500",
-      column: "left" as const,
     },
+  ];
+  const rightSensors = [
     {
       icon: Ruler,
       name: "Depth",
       desc: "Tracks dive depth and movement",
       color: "from-blue-500 to-cyan-500",
-      column: "right" as const,
     },
     {
       icon: Satellite,
       name: "GPS",
       desc: "Tracks migration and patterns",
       color: "from-yellow-500 to-amber-500",
-      column: "right" as const,
     },
     {
       icon: FishIcon,
       name: "Prey Analysis",
       desc: "Detects what the shark is eating",
       color: "from-green-500 to-emerald-500",
-      column: "right" as const,
     },
   ];
-
-  const leftSensors = sensors.filter((sensor) => sensor.column === "left");
-  const rightSensors = sensors.filter((sensor) => sensor.column === "right");
-  const renderSensorCard = (sensor: SensorCard, index: number) => {
-    const Icon = sensor.icon;
-    return (
-      <motion.div
-        key={sensor.name}
-        initial={{ opacity: 0, scale: 0 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{
-          delay: 0.8 + index * 0.1,
-          type: "spring",
-          stiffness: 200,
-        }}
-        className="pointer-events-auto"
-      >
-        <div className="backdrop-blur-md bg-slate-900/90 rounded-xl p-4 border border-cyan-500/30 shadow-xl max-w-[200px]">
-          <div
-            className={`w-12 h-12 rounded-full bg-gradient-to-br ${sensor.color} flex items-center justify-center mb-3`}
-          >
-            <Icon className="w-6 h-6 text-white" />
-          </div>
-          <h4 className="text-white font-semibold mb-1">{sensor.name}</h4>
-          <p className="text-slate-300 text-sm">{sensor.desc}</p>
-        </div>
-      </motion.div>
-    );
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-blue-950 to-cyan-950 pt-24 pb-16">
@@ -167,30 +354,44 @@ export default function Shark3DView() {
         </motion.div>
 
         <div className="relative">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.3, duration: 0.8 }}
-            className="backdrop-blur-md bg-slate-900/40 rounded-3xl border border-cyan-500/30 shadow-2xl overflow-hidden"
-            style={{ height: "600px" }}
-          >
+          {/* hint centralizado */}
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 backdrop-blur-md bg-cyan-500/20 rounded-lg px-4 py-2 border border-cyan-500/50 shadow">
+            <p className="text-cyan-300 text-sm font-medium">
+              Drag to rotate • Scroll to zoom
+            </p>
+          </div>
+
+          {/* ====== CONTAINER SEM FLICKER + CANVAS 100% ====== */}
+          <div className="relative h-[600px] rounded-3xl border border-cyan-500/30 shadow-2xl overflow-hidden">
+            {/* fundo sólido já no 1º frame */}
+            <div className="absolute inset-0 bg-[#0b1225]" />
+
             <Canvas
+              className="absolute inset-0 block"
               shadows
               gl={{ antialias: true }}
-              onCreated={({ scene }) => {
-                scene.background = new THREE.Color("#0b1225");
-                scene.fog = new THREE.Fog("#0b1225", 10, 40);
-              }}
             >
-              <PerspectiveCamera makeDefault position={[0, 1.5, 5.2]} />
+              {/* background e fog via nodes (síncrono) */}
+              <color attach="background" args={["#0b1225"]} />
+              <fog attach="fog" args={["#0b1225", 10, 40]} />
+
+              {/* keys se quiser forçar remontagem em dev: */}
+              <PerspectiveCamera ref={camRef} makeDefault key="cam-v3" />
               <OrbitControls
+                ref={controlsRef}
                 enablePan={false}
-                minDistance={3}
-                maxDistance={15}
+                minDistance={4}
+                maxDistance={10}
                 autoRotate
-                autoRotateSpeed={0.6}
+                autoRotateSpeed={0.8}
+                minPolarAngle={Math.PI * 0.5} // ~45° acima do horizonte
+                maxPolarAngle={Math.PI * 0.75} // ~45° abaixo (evita vista de topo)
+                // opcional: trave a rotação para não ir completamente para trás:
+                // minAzimuthAngle={-Math.PI * 0.6}
+                // maxAzimuthAngle={ Math.PI * 0.6}
               />
 
+              {/* luzes base */}
               <ambientLight intensity={1.1} />
               <directionalLight
                 position={[5, 10, 5]}
@@ -216,6 +417,7 @@ export default function Shark3DView() {
                 <SharkModel />
               </Suspense>
 
+              {/* chão */}
               <mesh
                 receiveShadow
                 rotation={[-Math.PI / 2, 0, 0]}
@@ -226,23 +428,18 @@ export default function Shark3DView() {
               </mesh>
             </Canvas>
 
-            <div className="absolute top-6 left-6 backdrop-blur-md bg-cyan-500/20 rounded-lg px-4 py-2 border border-cyan-500/50">
-              <p className="text-cyan-300 text-sm font-medium">
-                Drag to rotate • Scroll to zoom
-              </p>
-            </div>
-          </motion.div>
-
-          <div className="absolute inset-0 hidden lg:block pointer-events-none">
-            <div className="absolute left-8 top-24 flex flex-col gap-6 pointer-events-auto">
-              {leftSensors.map((sensor, index) =>
-                renderSensorCard(sensor, index)
-              )}
-            </div>
-            <div className="absolute right-8 top-24 flex flex-col gap-6 pointer-events-auto">
-              {rightSensors.map((sensor, index) =>
-                renderSensorCard(sensor, leftSensors.length + index)
-              )}
+            {/* Overlay lateral (desktop) */}
+            <div className="pointer-events-none absolute inset-0 hidden lg:flex items-center justify-between px-6">
+              <div className="pointer-events-auto flex flex-col gap-6">
+                {leftSensors.map((s) => (
+                  <SensorCard key={s.name} {...s} />
+                ))}
+              </div>
+              <div className="pointer-events-auto flex flex-col gap-6 items-end">
+                {rightSensors.map((s) => (
+                  <SensorCard key={s.name} {...s} />
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -267,5 +464,5 @@ export default function Shark3DView() {
   );
 }
 
-// Precarrega o modelo
-useGLTF.preload("/models/shark.glb");
+/* Preload do modelo */
+useGLTF.preload("/models/shark_v5.glb");

@@ -508,12 +508,21 @@ export default function GlobeApp() {
   }, [selectedSpecies, sharkSpecies]);
 
   useEffect(() => {
-    if (!selectedPredictionSpecies.length) return;
+    if (!predictionSpecies.length) {
+      setSelectedPredictionSpecies([]);
+      return;
+    }
+
+    if (!selectedPredictionSpecies.length) {
+      setSelectedPredictionSpecies([predictionSpecies[0]]);
+      return;
+    }
+
     const valid = selectedPredictionSpecies.filter((species) =>
       predictionSpecies.includes(species)
     );
     if (valid.length !== selectedPredictionSpecies.length) {
-      setSelectedPredictionSpecies(valid);
+      setSelectedPredictionSpecies(valid.length ? valid : [predictionSpecies[0]]);
     }
   }, [selectedPredictionSpecies, predictionSpecies]);
 
@@ -567,10 +576,6 @@ export default function GlobeApp() {
   }, []);
 
   const activePredData = useMemo(() => {
-    if (selectedPredictionSpecies.length === 0) {
-      return predData;
-    }
-
     const combined: DataPoint[] = [];
     selectedPredictionSpecies.forEach((species) => {
       const rows = predictionSpeciesCache[species];
@@ -582,10 +587,10 @@ export default function GlobeApp() {
   }, [predData, selectedPredictionSpecies, predictionSpeciesCache]);
 
   const predictionFilterLabel = useMemo(() => {
-    if (selectedPredictionSpecies.length === 0) {
-      return "Filter species";
+    if (!selectedPredictionSpecies.length) {
+      return "Select species";
     }
-    return `${selectedPredictionSpecies.length} species selected`;
+    return selectedPredictionSpecies[0];
   }, [selectedPredictionSpecies]);
 
   const handleSendChat = useCallback(() => {
@@ -905,19 +910,6 @@ export default function GlobeApp() {
             </div>
 
             <div className="max-h-[320px] overflow-y-auto px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/70 hover:border-cyan-400/60 transition cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selectedPredictionSpecies.length === 0}
-                  onChange={(event) => {
-                    if (event.target.checked) {
-                      setSelectedPredictionSpecies([]);
-                    }
-                  }}
-                  className="accent-cyan-400"
-                />
-                <span className="text-sm font-medium">All species</span>
-              </label>
               {predictionSpecies.map((species) => {
                 const checked = selectedPredictionSpecies.includes(species);
                 const loading = predictionSpeciesLoading[species];
@@ -938,13 +930,9 @@ export default function GlobeApp() {
                       checked={checked}
                       onChange={(event) => {
                         if (event.target.checked) {
-                          setSelectedPredictionSpecies((prev) =>
-                            prev.includes(species) ? prev : [...prev, species]
-                          );
+                          setSelectedPredictionSpecies([species]);
                         } else {
-                          setSelectedPredictionSpecies((prev) =>
-                            prev.filter((item) => item !== species)
-                          );
+                          setSelectedPredictionSpecies([]);
                         }
                       }}
                       className="accent-cyan-400"
