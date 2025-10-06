@@ -448,16 +448,80 @@ export default function Shark3DView() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1.6, duration: 0.8 }}
-          className="mt-12 backdrop-blur-md bg-slate-800/40 rounded-2xl p-8 border border-cyan-500/20"
+          className="mt-12 space-y-12"
         >
-          <h3 className="text-2xl font-bold text-cyan-400 mb-4 text-center">
-            The Future of Marine Conservation
-          </h3>
-          <p className="text-slate-300 text-center max-w-3xl mx-auto leading-relaxed">
-            Our Smart Tag technology combines cutting-edge sensors with
-            satellite communication to provide real-time insights into shark
-            behavior, migration patterns, and ecosystem health.
-          </p>
+          <div className="backdrop-blur-md bg-slate-800/40 rounded-2xl p-8 border border-cyan-500/20 shadow-2xl">
+            <h3 className="text-3xl md:text-4xl font-bold text-cyan-300 mb-4 text-center drop-shadow">
+              Why Smart Tags Matter
+            </h3>
+            <p className="text-slate-300 text-center max-w-3xl mx-auto leading-relaxed text-lg">
+              Understanding what sharks eat, where they travel, and how they behave allows us to
+              safeguard marine life and maintain ocean balance. These insights help us to:
+            </p>
+
+            <div className="mt-10 grid gap-6 md:grid-cols-3">
+              {[
+                {
+                  title: "Map Migration Routes",
+                  description: "Track seasonal movements and breeding corridors.",
+                  icon: "🌊",
+                },
+                {
+                  title: "Identify Critical Habitats",
+                  description: "Protect essential nursery and feeding grounds.",
+                  icon: "🎯",
+                },
+                {
+                  title: "Monitor Ecosystem Health",
+                  description: "Understand how sharks interact with their environment.",
+                  icon: "📊",
+                },
+              ].map((item) => (
+                <div
+                  key={item.title}
+                  className="rounded-2xl border border-cyan-500/20 bg-slate-900/70 px-6 py-8 text-center shadow-lg"
+                >
+                  <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-cyan-500/15 text-2xl">
+                    {item.icon}
+                  </div>
+                  <h4 className="text-lg font-semibold text-white mb-2">
+                    {item.title}
+                  </h4>
+                  <p className="text-sm text-slate-300 leading-relaxed">
+                    {item.description}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="backdrop-blur-md bg-slate-800/40 rounded-2xl p-8 border border-cyan-500/20 shadow-2xl">
+            <h3 className="text-3xl md:text-4xl font-bold text-cyan-300 mb-8 text-center drop-shadow">
+              Technical Specifications
+            </h3>
+
+            <div className="grid gap-10 md:grid-cols-2">
+              <div>
+                <h4 className="text-lg font-semibold text-cyan-200 mb-4">Hardware</h4>
+                <ul className="space-y-3 text-sm text-slate-300">
+                  <li>• Titanium shell rated to 3000m depth (waterproof and pressure-proof).</li>
+                  <li>• Energy-harvesting battery with 5-year lifespan.</li>
+                  <li>• Multi-sensor suite with real-time onboard processing.</li>
+                  <li>• Dual communication: satellite uplink and acoustic telemetry.</li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="text-lg font-semibold text-cyan-200 mb-4">Data Capture</h4>
+                <ul className="space-y-3 text-sm text-slate-300">
+                  <li>• GPS fixes every 15 minutes for migration tracking.</li>
+                  <li>• Temperature &amp; depth readings every 5 seconds.</li>
+                  <li>• Continuous acceleration and posture monitoring.</li>
+                  <li>• Encrypted storage and cloud analytics pipeline.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
         </motion.div>
       </div>
     </div>

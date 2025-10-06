@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Map, useControl } from "react-map-gl/maplibre";
-import type { ViewState } from "react-map-gl/maplibre";
+import type { MapRef, ViewState } from "react-map-gl/maplibre";
 import { MapboxOverlay as DeckOverlay } from "@deck.gl/mapbox";
 import Papa from "papaparse";
 import { ScatterplotLayer, PolygonLayer } from "@deck.gl/layers";
@@ -24,9 +24,143 @@ type LayerConfig = {
 
 type DataPoint = { [key: string]: any };
 
+type FocusArea = {
+  name: string;
+  polygon: [number, number][];
+  bounds: {
+    latMin: number;
+    latMax: number;
+    lonMin: number;
+    lonMax: number;
+  };
+};
+
+async function sendChatRequest(
+  payload: ChatRequestPayload
+): Promise<ChatResponse> {
+  if (CHAT_API_URL) {
+    const response = await fetch(CHAT_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      return {
+        mode: payload.mode,
+        reply: "Não consegui processar sua solicitação. Tente novamente em instantes.",
+        commands: [],
+      };
+    }
+    const json = (await response.json()) as ChatResponse;
+    return json;
+  }
+
+  return mockChatApi(payload);
+}
+
+async function mockChatApi(payload: ChatRequestPayload): Promise<ChatResponse> {
+  const lower = payload.message.toLowerCase();
+
+  if (payload.mode === "agent" && lower.includes("costa do brasil")) {
+    return {
+      mode: payload.mode,
+      reply:
+        "Ativei a camada de previsões para Sphyrna e destaquei a costa brasileira.",
+      commands: [
+        { action: "toggle-layer", layerId: "predictions", enabled: true },
+        { action: "toggle-layer", layerId: "sharks", enabled: false },
+        { action: "filter-prediction-species", species: "Sphyrna" },
+        {
+          action: "highlight-area",
+          name: "Costa do Brasil",
+          bounds: [
+            [-55, -35],
+            [-28, 5],
+          ],
+          polygon: [
+            [-55, 5],
+            [-28, 5],
+            [-28, -35],
+            [-55, -35],
+            [-55, 5],
+          ],
+        },
+        {
+          action: "plot-h3",
+          layerId: "predictions",
+          species: "Sphyrna",
+          cells: [
+            { h3: "85560b2ffffffff", probability: 0.82 },
+            { h3: "85560b6ffffffff", probability: 0.77 },
+            { h3: "85561b07fffffff", probability: 0.73 },
+          ],
+        },
+      ],
+    };
+  }
+
+  if (lower.includes("erro")) {
+    return {
+      mode: payload.mode,
+      reply: "Não consegui processar sua solicitação. Tente novamente em instantes.",
+      commands: [],
+    };
+  }
+
+  return {
+    mode: payload.mode,
+    reply:
+      payload.mode === "agent"
+        ? "Por enquanto sou um mock. Peça, por exemplo, para ver os tubarões previstos na costa do Brasil."
+        : "Sou um mock em modo chat. Posso responder perguntas gerais quando estiver conectado à IA real.",
+    commands: [],
+  };
+}
+
+type H3Highlight = {
+  layerId: LayerId;
+  species?: string;
+  cells: {
+    h3: string;
+    weight?: number;
+    [key: string]: any;
+  }[];
+};
+
 const s3Domain = "https://source-bucket-kipp.s3.us-west-2.amazonaws.com";
 const s3BucketName = "hackathon-nasa-2025";
 const s3Bucket = `${s3Domain}/${s3BucketName}`;
+const CHAT_API_URL = ""; // TODO: configure when backend is ready
+
+type ChatMode = "chat" | "agent";
+
+type ChatRequestPayload = {
+  mode: ChatMode;
+  message: string;
+  state: {
+    layers: { id: LayerId; enabled: boolean; opacity: number }[];
+    selectedSharkSpecies: string[];
+    predictionSpecies: string | null;
+    focusArea: FocusArea | null;
+  };
+  view: {
+    center: { longitude: number; latitude: number };
+    zoom: number;
+    bearing: number;
+    pitch: number;
+  };
+  userLocation: {
+    latitude: number;
+    longitude: number;
+    accuracyMeters?: number;
+  } | null;
+};
+
+type ChatResponse = {
+  mode: ChatMode;
+  reply: string;
+  commands: any[];
+};
 
 const REMOTE_SOURCES = {
   plankton: `${s3Bucket}/planktons/AQUA_MODIS.20250101_20250131.L3m.MO.CHL.chlor_a.9km.h3r5.csv`,
@@ -315,6 +449,14 @@ export default function GlobeApp() {
   ]);
   const [chatInput, setChatInput] = useState("");
   const [isChatSending, setIsChatSending] = useState(false);
+  const mapRef = useRef<MapRef | null>(null);
+  const [viewState, setViewState] = useState<ViewState>(INITIAL_VIEW_STATE);
+  const [userLocation, setUserLocation] = useState<
+    ChatRequestPayload["userLocation"]
+  >(null);
+  const [chatMode, setChatMode] = useState<ChatMode>("agent");
+  const [focusArea, setFocusArea] = useState<FocusArea | null>(null);
+  const [h3Highlights, setH3Highlights] = useState<H3Highlight[]>([]);
 
   const setDatasetLoading = useCallback(
     (key: keyof typeof loadingState, value: boolean) => {
@@ -322,6 +464,24 @@ export default function GlobeApp() {
     },
     [setLoadingState]
   );
+
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracyMeters: position.coords.accuracy,
+          });
+        },
+        () => {
+          setUserLocation(null);
+        },
+        { enableHighAccuracy: false, timeout: 5000 }
+      );
+    }
+  }, []);
 
   const [layers, setLayers] = useState<LayerConfig[]>([
     {
@@ -578,13 +738,45 @@ export default function GlobeApp() {
   const activePredData = useMemo(() => {
     const combined: DataPoint[] = [];
     selectedPredictionSpecies.forEach((species) => {
-      const rows = predictionSpeciesCache[species];
-      if (rows?.length) {
-        combined.push(...rows);
-      }
+      const rows = predictionSpeciesCache[species] ?? [];
+      rows.forEach((row) => {
+        if (!focusArea) {
+          combined.push(row);
+          return;
+        }
+        const lat = Number(row.latitude);
+        const lon = Number(row.longitude);
+        if (
+          Number.isFinite(lat) &&
+          Number.isFinite(lon) &&
+          lat >= focusArea.bounds.latMin &&
+          lat <= focusArea.bounds.latMax &&
+          lon >= focusArea.bounds.lonMin &&
+          lon <= focusArea.bounds.lonMax
+        ) {
+          combined.push(row);
+        }
+      });
     });
+
+    if (!selectedPredictionSpecies.length && !combined.length) {
+      if (!focusArea) return predData;
+      return predData.filter((row) => {
+        const lat = Number(row.latitude);
+        const lon = Number(row.longitude);
+        return (
+          Number.isFinite(lat) &&
+          Number.isFinite(lon) &&
+          lat >= focusArea.bounds.latMin &&
+          lat <= focusArea.bounds.latMax &&
+          lon >= focusArea.bounds.lonMin &&
+          lon <= focusArea.bounds.lonMax
+        );
+      });
+    }
+
     return combined;
-  }, [predData, selectedPredictionSpecies, predictionSpeciesCache]);
+  }, [predData, selectedPredictionSpecies, predictionSpeciesCache, focusArea]);
 
   const predictionFilterLabel = useMemo(() => {
     if (!selectedPredictionSpecies.length) {
@@ -592,6 +784,251 @@ export default function GlobeApp() {
     }
     return selectedPredictionSpecies[0];
   }, [selectedPredictionSpecies]);
+
+  const focusBounds = useCallback(
+    (bounds: [[number, number], [number, number]]) => {
+      const map = mapRef.current?.getMap();
+      if (!map) return;
+      map.fitBounds(bounds, {
+        padding: { top: 60, bottom: 60, left: 80, right: 80 },
+        speed: 0.8,
+        curve: 1.6,
+        essential: true,
+      });
+    },
+    []
+  );
+
+  const buildChatPayload = useCallback(
+    (message: string): ChatRequestPayload => ({
+      mode: chatMode,
+      message,
+      state: {
+        layers: layers.map((layer) => ({
+          id: layer.id,
+          enabled: layer.enabled,
+          opacity: layer.opacity,
+        })),
+        selectedSharkSpecies: selectedSpecies,
+        predictionSpecies: selectedPredictionSpecies[0] ?? null,
+        focusArea,
+      },
+      view: {
+        center: {
+          longitude: viewState.longitude ?? 0,
+          latitude: viewState.latitude ?? 0,
+        },
+        zoom: viewState.zoom ?? INITIAL_VIEW_STATE.zoom,
+        bearing: viewState.bearing ?? INITIAL_VIEW_STATE.bearing,
+        pitch: viewState.pitch ?? INITIAL_VIEW_STATE.pitch,
+      },
+      userLocation,
+    }),
+    [
+      chatMode,
+      layers,
+      selectedSpecies,
+      selectedPredictionSpecies,
+      focusArea,
+      viewState,
+      userLocation,
+    ]
+  );
+
+  const applyCommand = useCallback(
+    (command: any) => {
+      if (!command || typeof command !== "object") return;
+
+      switch (command.action) {
+        case "toggle-layer": {
+          const layerId = command.layerId as LayerId | undefined;
+          if (!layerId) return;
+          setLayers((prev) =>
+            prev.map((layer) =>
+              layer.id === layerId
+                ? { ...layer, enabled: command.enabled ?? !layer.enabled }
+                : layer
+            )
+          );
+          break;
+        }
+        case "set-opacity":
+        case "set-layer-opacity": {
+          const layerId = command.layerId as LayerId | undefined;
+          const opacity = Number(command.opacity);
+          if (!layerId || Number.isNaN(opacity)) return;
+          const clamped = Math.min(Math.max(opacity, 0), 1);
+          setLayers((prev) =>
+            prev.map((layer) =>
+              layer.id === layerId ? { ...layer, opacity: clamped } : layer
+            )
+          );
+          break;
+        }
+        case "filter-shark-species": {
+          const species = command.species;
+          if (Array.isArray(species)) {
+            setSelectedSpecies(species);
+          } else if (typeof species === "string") {
+            setSelectedSpecies([species]);
+          }
+          break;
+        }
+        case "filter-prediction-species": {
+          const species = command.species;
+          if (typeof species === "string" && species.length) {
+            setSelectedPredictionSpecies([species]);
+          }
+          break;
+        }
+        case "clear-shark-filter": {
+          setSelectedSpecies([]);
+          break;
+        }
+        case "clear-prediction-filter": {
+          setSelectedPredictionSpecies([]);
+          break;
+        }
+        case "clear-plot": {
+          setH3Highlights([]);
+          break;
+        }
+        case "plot-h3": {
+          const layerId = command.layerId as LayerId | undefined;
+          const cells = Array.isArray(command.cells)
+            ? command.cells
+                .map((item: any) => ({ h3: item?.h3, weight: item?.probability ?? item?.weight }))
+                .filter((item: { h3: string | undefined }) =>
+                  typeof item.h3 === "string" && h3.isValidCell(item.h3)
+                )
+            : [];
+
+          if (!layerId || !cells.length) break;
+
+          setH3Highlights((prev) => {
+            const filtered = prev.filter((item) => item.layerId !== layerId);
+            return [
+              ...filtered,
+              {
+                layerId,
+                species: command.species,
+                cells,
+              },
+            ];
+          });
+          break;
+        }
+        case "clear-highlight": {
+          setFocusArea(null);
+          break;
+        }
+        case "highlight-area": {
+          if (command.clear) {
+            setFocusArea(null);
+            break;
+          }
+
+          let polygon: [number, number][] | undefined;
+          if (Array.isArray(command.polygon) && command.polygon.length >= 3) {
+            const normalized = command.polygon
+              .map((pair: any) => {
+                if (!pair) return null;
+                const lon = Number(pair[0]);
+                const lat = Number(pair[1]);
+                return Number.isFinite(lon) && Number.isFinite(lat)
+                  ? ([lon, lat] as [number, number])
+                  : null;
+              })
+              .filter((value: [number, number] | null): value is [number, number] => value !== null);
+
+            if (normalized.length >= 3) {
+              const first = normalized[0];
+              const last = normalized[normalized.length - 1];
+              if (first[0] !== last[0] || first[1] !== last[1]) {
+                normalized.push(first);
+              }
+              polygon = normalized;
+            }
+          }
+
+          let boundsArray: [[number, number], [number, number]] | undefined;
+          if (Array.isArray(command.bounds) && command.bounds.length === 2) {
+            const ll = command.bounds[0];
+            const ur = command.bounds[1];
+            const minLon = Number(ll[0]);
+            const minLat = Number(ll[1]);
+            const maxLon = Number(ur[0]);
+            const maxLat = Number(ur[1]);
+            if (
+              [minLon, minLat, maxLon, maxLat].every((v) =>
+                Number.isFinite(v)
+              )
+            ) {
+              boundsArray = [
+                [minLon, minLat],
+                [maxLon, maxLat],
+              ];
+              polygon ??= [
+                [minLon, maxLat],
+                [maxLon, maxLat],
+                [maxLon, minLat],
+                [minLon, minLat],
+                [minLon, maxLat],
+              ];
+            }
+          }
+
+          if (polygon && polygon.length >= 3) {
+            const lats = polygon.map(([, lat]) => lat);
+            const lons = polygon.map(([lon]) => lon);
+            const area: FocusArea = {
+              name: command.name ?? "Área destacada",
+              polygon,
+              bounds: {
+                latMin: Math.min(...lats),
+                latMax: Math.max(...lats),
+                lonMin: Math.min(...lons),
+                lonMax: Math.max(...lons),
+              },
+            };
+            setFocusArea(area);
+            if (boundsArray) {
+              focusBounds(boundsArray);
+            }
+          }
+
+          break;
+        }
+        case "focus-bounds": {
+          if (
+            Array.isArray(command.bounds) &&
+            command.bounds.length === 2
+          ) {
+            const ll = command.bounds[0];
+            const ur = command.bounds[1];
+            const minLon = Number(ll[0]);
+            const minLat = Number(ll[1]);
+            const maxLon = Number(ur[0]);
+            const maxLat = Number(ur[1]);
+            if (
+              [minLon, minLat, maxLon, maxLat].every((v) =>
+                Number.isFinite(v)
+              )
+            ) {
+              focusBounds([
+                [minLon, minLat],
+                [maxLon, maxLat],
+              ]);
+            }
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    },
+    [focusBounds]
+  );
 
   const handleSendChat = useCallback(() => {
     const trimmed = chatInput.trim();
@@ -607,18 +1044,39 @@ export default function GlobeApp() {
     setChatInput("");
     setIsChatSending(true);
 
-    setTimeout(() => {
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content:
-          "Ainda não estou conectado a uma LLM. Em breve vou conseguir aplicar comandos no globo automaticamente.",
-        timestamp: new Date().toISOString(),
-      };
-      setChatMessages((prev) => [...prev.slice(-19), assistantMessage]);
-      setIsChatSending(false);
-    }, 600);
-  }, [chatInput]);
+    const payload = buildChatPayload(trimmed);
+
+    sendChatRequest(payload)
+      .then((response) => {
+        const replyText = response?.reply
+          ? String(response.reply)
+          : "Não consegui processar sua solicitação. Tente novamente em instantes.";
+
+        const assistantMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: replyText,
+          timestamp: new Date().toISOString(),
+        };
+        setChatMessages((prev) => [...prev.slice(-19), assistantMessage]);
+
+        if (response?.mode === "agent" && Array.isArray(response?.commands)) {
+          response.commands.forEach(applyCommand);
+        }
+      })
+      .catch(() => {
+        const assistantMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "Não consegui processar sua solicitação. Tente novamente em instantes.",
+          timestamp: new Date().toISOString(),
+        };
+        setChatMessages((prev) => [...prev.slice(-19), assistantMessage]);
+      })
+      .finally(() => {
+        setIsChatSending(false);
+      });
+  }, [chatInput, applyCommand, buildChatPayload]);
 
   const deckLayers = useMemo(() => {
     const arr: any[] = [];
@@ -632,7 +1090,7 @@ export default function GlobeApp() {
           data: planktonData,
           getPolygon: (d) =>
             typeof d.h3 === "string" && h3.isValidCell(d.h3)
-              ? h3.cellToBoundary(d.h3, true).map(([lat, lon]) => [lat, lon])
+              ? h3.cellToBoundary(d.h3, true).map(([lat, lon]) => [lon, lat])
               : null,
           getFillColor: [r, g, b, 200],
           getLineColor: [r, g, b, 220],
@@ -725,6 +1183,56 @@ export default function GlobeApp() {
       );
     }
 
+    if (focusArea) {
+      arr.push(
+        new PolygonLayer({
+          id: "focus-area",
+          data: [{ polygon: focusArea.polygon }],
+          getPolygon: (d) => d.polygon,
+          stroked: true,
+          getLineColor: [56, 189, 248, 200],
+          getFillColor: [56, 189, 248, 60],
+          lineWidthMinPixels: 2,
+          opacity: 0.4,
+          pickable: false,
+        })
+      );
+    }
+
+    h3Highlights.forEach((highlight) => {
+      if (highlight.layerId === "predictions") {
+        arr.push(
+          new H3HexagonLayer({
+            id: `highlight-h3-${highlight.layerId}`,
+            data: highlight.cells,
+            getHexagon: (d) => (d.h3 ? d.h3 : null),
+            getElevation: (d) => (Number(d.weight) || 0) * 50000,
+            getFillColor: [138, 43, 226, 180],
+            opacity: 0.85,
+            extruded: true,
+            pickable: false,
+          })
+        );
+      } else {
+        arr.push(
+          new PolygonLayer({
+            id: `highlight-h3-${highlight.layerId}`,
+            data: highlight.cells,
+            getPolygon: (d) =>
+              d.h3
+                ? h3
+                    .cellToBoundary(d.h3, true)
+                    .map(([lat, lon]) => [lon, lat])
+                : null,
+            stroked: false,
+            filled: true,
+            getFillColor: [138, 43, 226, 160],
+            opacity: 0.8,
+          })
+        );
+      }
+    });
+
     return arr;
   }, [
     planktonData,
@@ -734,6 +1242,8 @@ export default function GlobeApp() {
     activePredData,
     sstRange,
     selectedSpecies,
+    focusArea,
+    h3Highlights,
     getLayerCfg,
   ]);
 
@@ -776,10 +1286,12 @@ export default function GlobeApp() {
               />
             </div>
             <Map
+              ref={mapRef}
               reuseMaps
               projection="globe"
               initialViewState={INITIAL_VIEW_STATE}
               mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+              onMove={(event) => setViewState(event.viewState)}
               style={{ width: "100%", height: "100%", borderRadius: "24px" }}
             >
               <DeckGLOverlay
@@ -797,6 +1309,8 @@ export default function GlobeApp() {
           onChangeInput={setChatInput}
           onSend={handleSendChat}
           isSending={isChatSending}
+          mode={chatMode}
+          onModeChange={setChatMode}
         />
       </div>
       {sharkSpecies.length > 0 && isSpeciesModalOpen && (

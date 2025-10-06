@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { SendHorizonal, Bot, User } from "lucide-react";
+import { SendHorizonal, Bot, User, MessageCircle } from "lucide-react";
 
 export type ChatRole = "user" | "assistant";
 
@@ -16,6 +16,8 @@ interface ChatPanelProps {
   onChangeInput: (value: string) => void;
   onSend: () => void;
   isSending?: boolean;
+  mode: "chat" | "agent";
+  onModeChange: (mode: "chat" | "agent") => void;
 }
 
 export default function ChatPanel({
@@ -24,6 +26,8 @@ export default function ChatPanel({
   onChangeInput,
   onSend,
   isSending,
+  mode,
+  onModeChange,
 }: ChatPanelProps) {
   const canSend = inputValue.trim().length > 0 && !isSending;
 
@@ -32,10 +36,38 @@ export default function ChatPanel({
   return (
     <aside className="hidden xl:flex w-[360px] shrink-0 flex-col border-l border-cyan-500/20 bg-slate-950/60 backdrop-blur-md text-slate-100 pt-24">
       <header className="px-5 py-4 border-b border-cyan-500/20">
-        <h3 className="text-lg font-semibold text-cyan-300">Ocean Copilot</h3>
-        <p className="text-xs text-slate-400 mt-1">
-          Converse em linguagem natural para ajustar o globo ou tirar dúvidas.
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-cyan-300">Ocean Copilot</h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Converse em linguagem natural para ajustar o globo ou tirar dúvidas.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onModeChange("chat")}
+              className={`flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold uppercase tracking-wide transition ${
+                mode === "chat"
+                  ? "bg-cyan-500/30 text-cyan-100 border border-cyan-400/60"
+                  : "bg-slate-800/60 text-slate-400 border border-slate-700/60 hover:border-cyan-400/40 hover:text-cyan-200"
+              }`}
+            >
+              <MessageCircle className="w-3 h-3" /> Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => onModeChange("agent")}
+              className={`flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold uppercase tracking-wide transition ${
+                mode === "agent"
+                  ? "bg-cyan-500/30 text-cyan-100 border border-cyan-400/60"
+                  : "bg-slate-800/60 text-slate-400 border border-slate-700/60 hover:border-cyan-400/40 hover:text-cyan-200"
+              }`}
+            >
+              <Bot className="w-3 h-3" /> Agent
+            </button>
+          </div>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
