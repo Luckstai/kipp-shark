@@ -14,6 +14,7 @@ import {
   Activity,
   Fish as FishIcon,
   Satellite,
+  BatteryCharging,
 } from "lucide-react";
 import * as THREE from "three";
 
@@ -312,6 +313,12 @@ export default function Shark3DView() {
       name: "Acceleration",
       desc: "Detects hunting activity",
       color: "from-purple-500 to-pink-500",
+    },
+    {
+      icon: BatteryCharging,
+      name: "Energy Harvest",
+      desc: "Turns shark motion and water flow into electrical power.",
+      color: "from-amber-500 to-yellow-500",
     },
   ];
   const rightSensors = [
