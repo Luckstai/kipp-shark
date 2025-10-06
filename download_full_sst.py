@@ -41,11 +41,11 @@ except Exception as _e:
 # CONFIGURAÇÕES
 # =========================
 SHORT_NAME = "MODISA_L3m_SST"
-GRANULE_NAME = "*DAY*.SST.sst.4km*"
+GRANULE_NAME = "*.MO*.SST.sst.9km*"
 PROVIDER = "OB_CLOUD"
 
 START_DATE = dt.date(2015, 1, 1)
-END_DATE = dt.date.today()
+END_DATE = dt.date(2024, 1, 1)
 
 BASE_DIR = Path("downloads/sst")
 NC_DIR = BASE_DIR / "nc"
@@ -262,14 +262,14 @@ def search_and_download_month(
     *,
     short_name: str,
     granule_name: str,
-    provider: str,
+    # provider: str,
     nc_dir: Path,
     csv_dir: Path,
     sort_key: Optional[str] = "-start_date",
 ) -> Tuple[int, int]:
     params = {
         "short_name": short_name,
-        "provider": provider,
+        # "provider": provider,
         "downloadable": True,
         "temporal": (mstart.isoformat(), mend.isoformat()),
         "granule_name": granule_name,
@@ -336,7 +336,7 @@ def main():
                 mstart, mend,
                 short_name=SHORT_NAME,
                 granule_name=GRANULE_NAME,
-                provider=PROVIDER,
+                # provider=PROVIDER,
                 nc_dir=NC_DIR,
                 csv_dir=CSV_DIR,
                 sort_key="-start_date",

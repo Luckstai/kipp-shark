@@ -12,6 +12,7 @@ import math
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+import datetime as dt
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List
 
@@ -44,9 +45,10 @@ SPECIES: List[str] = [
 ]
 
 # Janela temporal (últimos 10 anos até hoje)
-TODAY = datetime.utcnow().date()
-START_DATE = TODAY.replace(year=TODAY.year - 10)  # 10 anos atrás, mesma data
-END_DATE = TODAY                                  # inclui hoje
+# START_DATE = TODAY.replace(year=TODAY.year - 10)  # 10 anos atrás, mesma data
+# END_DATE = TODAY                                  # inclui hoje
+START_DATE = dt.date(2015, 1, 1)
+END_DATE = dt.date(2025, 1, 1)
 
 # OBIS API
 OBIS_URL = "https://api.obis.org/v3/occurrence"
@@ -62,7 +64,8 @@ MIN_POINTS_PER_HEX = 1   # aumente (ex.: 3, 5) para filtrar hexes pouco povoados
 
 # Saída
 BASE_DIR = Path("downloads/sharks")
-CSV_DIR = BASE_DIR / "daily"
+# agora salvamos por período (um arquivo para o intervalo start..end)
+CSV_DIR = BASE_DIR / "period"
 CSV_DIR.mkdir(parents=True, exist_ok=True)
 
 # Comportamento
@@ -195,33 +198,129 @@ def save_daily_csv(day: datetime.date, df: pd.DataFrame):
     print(f"💾 CSV salvo: {out_path} ({len(df)} linhas)")
 
 
+def fetch_one_species_period(species: str, start_date: datetime.date, end_date: datetime.date) -> Dict[Tuple[str, str], int]:
+    """
+    Busca no OBIS **global** para uma espécie em um período (start_date → end_date),
+    e agrega contagem por (date_iso, H3).
+    Retorna dict {(date_iso, h3_id): n_obs}.
+    """
+    total_est = None
+    offset = 0
+    counts: Dict[Tuple[str, str], int] = {}
+
+    while True:
+        params = {
+            "scientificname": species,
+            "startdate": start_date.isoformat(),
+            "enddate": end_date.isoformat(),
+            "size": PAGE_SIZE,
+            "from": offset,
+        }
+        resp = _req_get(OBIS_URL, params)
+        if resp is None:
+            # falha definitiva nesse bloco/página
+            break
+
+        data = resp.json()
+        results = data.get("results", [])
+        total_est = data.get("total", total_est)
+
+        if not results:
+            break
+
+        for rec in results:
+            lat = rec.get("decimalLatitude")
+            lon = rec.get("decimalLongitude")
+            if lat is None or lon is None:
+                continue
+
+            # extrai data do registro (usa os primeiros 10 chars se houver timestamp)
+            ev = rec.get("eventDate") or rec.get("date") or rec.get("eventdate")
+            if not ev:
+                continue
+            try:
+                date_iso = str(ev)[:10]
+            except Exception:
+                continue
+
+            try:
+                lat = float(lat); lon = float(lon)
+                if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+                    continue
+                h = _latlng_to_h3(lat, lon, H3_RESOLUTION)
+                key = (date_iso, h)
+                counts[key] = counts.get(key, 0) + 1
+            except Exception:
+                continue
+
+        offset += PAGE_SIZE
+        if total_est is not None and offset >= total_est:
+            break
+
+        time.sleep(REQUEST_SLEEP)
+
+    # filtro mínimo (aplica-se por (date,hex))
+    if MIN_POINTS_PER_HEX > 1 and counts:
+        counts = {k: n for k, n in counts.items() if n >= MIN_POINTS_PER_HEX}
+
+    return counts
+
+
+def fetch_all_species_period(start_date: datetime.date, end_date: datetime.date) -> pd.DataFrame:
+    """
+    Busca **todas as espécies** para o período e agrega por (date, species, h3).
+    Retorna DataFrame com colunas:
+      date, species, h3, n_obs, centroid_lat, centroid_lon
+    """
+    rows = []
+    for sp in SPECIES:
+        if VERBOSE:
+            print(f"📡 Período {start_date} → {end_date} | espécie={sp}")
+        counts = fetch_one_species_period(sp, start_date, end_date)
+        if not counts:
+            continue
+        for (date_iso, h), n in counts.items():
+            clat, clon = _h3_to_latlng(h)
+            rows.append({
+                "date": date_iso,
+                "species": sp,
+                "h3": h,
+                "n_obs": n,
+                "centroid_lat": clat,
+                "centroid_lon": clon,
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=["date","species","h3","n_obs","centroid_lat","centroid_lon"])
+    return pd.DataFrame(rows)
+
+
+def save_period_csv(start_date: datetime.date, end_date: datetime.date, df: pd.DataFrame):
+    """Salva o CSV do período no padrão solicitado (um arquivo para o intervalo)."""
+    out_path = CSV_DIR / f"sharks_h3r{H3_RESOLUTION}_{start_date.isoformat()}_{end_date.isoformat()}.csv"
+    if SKIP_IF_EXISTS and out_path.exists():
+        if VERBOSE:
+            print(f"↪️  Já existe: {out_path.name} (pulado)")
+        return
+    df.to_csv(out_path, index=False)
+    print(f"💾 CSV salvo: {out_path} ({len(df)} linhas)")
+
+
 # =============================
 # EXECUÇÃO
 # =============================
 
 def main():
-    print("🐟 OBIS → H3 diário (global)")
-    print(f"⏱️  Período: {START_DATE} → {END_DATE}  (mais recente → mais antigo)")
+    print("🐟 OBIS → H3 por período (global)")
+    print(f"⏱️  Período: {START_DATE} → {END_DATE}")
     print(f"🧪 Espécies: {', '.join(SPECIES)}")
     print(f"🔷 H3 res={H3_RESOLUTION}, min_points_per_hex={MIN_POINTS_PER_HEX}")
     print(f"📂 Saída: {CSV_DIR.resolve()}\n")
-
-    for day in daterange(START_DATE, END_DATE):
-        out_path = CSV_DIR / f"sharks_h3r{H3_RESOLUTION}_{day.isoformat()}.csv"
-        if SKIP_IF_EXISTS and out_path.exists():
-            if VERBOSE:
-                print(f"🗓️ {day} → já existe, pulando.")
-            continue
-
-        print(f"\n=== {day} ===")
-        df_day = fetch_all_species_one_day(day)
-        if df_day.empty:
-            print("⚠️  Sem ocorrências para este dia.")
-            # ainda pode salvar um CSV vazio, se preferir:
-            # df_day.to_csv(out_path, index=False)
-            continue
-
-        save_daily_csv(day, df_day)
+    df_period = fetch_all_species_period(START_DATE, END_DATE)
+    if df_period.empty:
+        print("⚠️  Sem ocorrências para o período.")
+    else:
+        save_period_csv(START_DATE, END_DATE, df_period)
 
     print("\n🏁 Finalizado.")
 
