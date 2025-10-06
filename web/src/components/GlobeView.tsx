@@ -47,7 +47,8 @@ async function sendChatRequest(
     if (!response.ok) {
       return {
         mode: payload.mode,
-        reply: "Não consegui processar sua solicitação. Tente novamente em instantes.",
+        reply:
+          "Não consegui processar sua solicitação. Tente novamente em instantes.",
         commands: [],
       };
     }
@@ -102,7 +103,8 @@ async function mockChatApi(payload: ChatRequestPayload): Promise<ChatResponse> {
   if (lower.includes("erro")) {
     return {
       mode: payload.mode,
-      reply: "Não consegui processar sua solicitação. Tente novamente em instantes.",
+      reply:
+        "Não consegui processar sua solicitação. Tente novamente em instantes.",
       commands: [],
     };
   }
@@ -130,7 +132,7 @@ type H3Highlight = {
 const s3Domain = "https://source-bucket-kipp.s3.us-west-2.amazonaws.com";
 const s3BucketName = "hackathon-nasa-2025";
 const s3Bucket = `${s3Domain}/${s3BucketName}`;
-const CHAT_API_URL = ""; // TODO: configure when backend is ready
+const CHAT_API_URL = "https://kipp-nasa.app.n8n.cloud/webhook-test/chat"; // TODO: configure when backend is ready
 
 type ChatMode = "chat" | "agent";
 
@@ -451,9 +453,8 @@ export default function GlobeApp() {
   const [isChatSending, setIsChatSending] = useState(false);
   const mapRef = useRef<MapRef | null>(null);
   const [viewState, setViewState] = useState<ViewState>(INITIAL_VIEW_STATE);
-  const [userLocation, setUserLocation] = useState<
-    ChatRequestPayload["userLocation"]
-  >(null);
+  const [userLocation, setUserLocation] =
+    useState<ChatRequestPayload["userLocation"]>(null);
   const [chatMode, setChatMode] = useState<ChatMode>("agent");
   const [focusArea, setFocusArea] = useState<FocusArea | null>(null);
   const [h3Highlights, setH3Highlights] = useState<H3Highlight[]>([]);
@@ -682,7 +683,9 @@ export default function GlobeApp() {
       predictionSpecies.includes(species)
     );
     if (valid.length !== selectedPredictionSpecies.length) {
-      setSelectedPredictionSpecies(valid.length ? valid : [predictionSpecies[0]]);
+      setSelectedPredictionSpecies(
+        valid.length ? valid : [predictionSpecies[0]]
+      );
     }
   }, [selectedPredictionSpecies, predictionSpecies]);
 
@@ -897,9 +900,13 @@ export default function GlobeApp() {
           const layerId = command.layerId as LayerId | undefined;
           const cells = Array.isArray(command.cells)
             ? command.cells
-                .map((item: any) => ({ h3: item?.h3, weight: item?.probability ?? item?.weight }))
-                .filter((item: { h3: string | undefined }) =>
-                  typeof item.h3 === "string" && h3.isValidCell(item.h3)
+                .map((item: any) => ({
+                  h3: item?.h3,
+                  weight: item?.probability ?? item?.weight,
+                }))
+                .filter(
+                  (item: { h3: string | undefined }) =>
+                    typeof item.h3 === "string" && h3.isValidCell(item.h3)
                 )
             : [];
 
@@ -939,7 +946,10 @@ export default function GlobeApp() {
                   ? ([lon, lat] as [number, number])
                   : null;
               })
-              .filter((value: [number, number] | null): value is [number, number] => value !== null);
+              .filter(
+                (value: [number, number] | null): value is [number, number] =>
+                  value !== null
+              );
 
             if (normalized.length >= 3) {
               const first = normalized[0];
@@ -960,9 +970,7 @@ export default function GlobeApp() {
             const maxLon = Number(ur[0]);
             const maxLat = Number(ur[1]);
             if (
-              [minLon, minLat, maxLon, maxLat].every((v) =>
-                Number.isFinite(v)
-              )
+              [minLon, minLat, maxLon, maxLat].every((v) => Number.isFinite(v))
             ) {
               boundsArray = [
                 [minLon, minLat],
@@ -1000,10 +1008,7 @@ export default function GlobeApp() {
           break;
         }
         case "focus-bounds": {
-          if (
-            Array.isArray(command.bounds) &&
-            command.bounds.length === 2
-          ) {
+          if (Array.isArray(command.bounds) && command.bounds.length === 2) {
             const ll = command.bounds[0];
             const ur = command.bounds[1];
             const minLon = Number(ll[0]);
@@ -1011,9 +1016,7 @@ export default function GlobeApp() {
             const maxLon = Number(ur[0]);
             const maxLat = Number(ur[1]);
             if (
-              [minLon, minLat, maxLon, maxLat].every((v) =>
-                Number.isFinite(v)
-              )
+              [minLon, minLat, maxLon, maxLat].every((v) => Number.isFinite(v))
             ) {
               focusBounds([
                 [minLon, minLat],
@@ -1068,7 +1071,8 @@ export default function GlobeApp() {
         const assistantMessage: ChatMessage = {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: "Não consegui processar sua solicitação. Tente novamente em instantes.",
+          content:
+            "Não consegui processar sua solicitação. Tente novamente em instantes.",
           timestamp: new Date().toISOString(),
         };
         setChatMessages((prev) => [...prev.slice(-19), assistantMessage]);
@@ -1220,9 +1224,7 @@ export default function GlobeApp() {
             data: highlight.cells,
             getPolygon: (d) =>
               d.h3
-                ? h3
-                    .cellToBoundary(d.h3, true)
-                    .map(([lat, lon]) => [lon, lat])
+                ? h3.cellToBoundary(d.h3, true).map(([lat, lon]) => [lon, lat])
                 : null,
             stroked: false,
             filled: true,

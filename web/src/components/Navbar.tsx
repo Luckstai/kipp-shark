@@ -11,7 +11,7 @@ export default function Navbar({ currentSection, onNavigate }: NavbarProps) {
   const sections = [
     { id: "learn", label: "Learn", icon: BookOpen },
     { id: "explore", label: "Explore", icon: Globe },
-    { id: "simulator", label: "Simulator", icon: LineChart },
+    { id: "simulator", label: "Prediction Engine", icon: LineChart },
     { id: "innovate", label: "Innovate", icon: Cpu },
   ];
 
