@@ -11,6 +11,7 @@ import { H3HexagonLayer } from "@deck.gl/geo-layers";
 import * as h3 from "h3-js";
 import LayerControlPanel from "./LayerControlPanel";
 import ChatPanel, { ChatMessage } from "./ChatPanel";
+import { MessageCircle } from "lucide-react";
 
 type LayerId = "plankton" | "sst" | "swot" | "sharks" | "predictions";
 
@@ -233,11 +234,10 @@ type GradientStop = {
 };
 
 const SST_GRADIENT: GradientStop[] = [
-  { t: 0, color: [33, 102, 172], hex: "#2166ac" },
-  { t: 0.25, color: [67, 147, 195], hex: "#4393c3" },
-  { t: 0.5, color: [146, 197, 222], hex: "#92c5de" },
-  { t: 0.75, color: [253, 219, 199], hex: "#fddbc7" },
-  { t: 1, color: [215, 48, 39], hex: "#d73027" },
+  { t: 0, color: [255, 244, 163], hex: "#fff4a3" },
+  { t: 0.4, color: [255, 214, 102], hex: "#ffd666" },
+  { t: 0.7, color: [255, 153, 51], hex: "#ff9933" },
+  { t: 1, color: [198, 40, 40], hex: "#c62828" },
 ];
 
 const PREDICTION_GRADIENT: GradientStop[] = [
@@ -291,17 +291,6 @@ const getSstColor = (
   const normalized = span === 0 ? 0 : (value - range.min) / span;
   const [r, g, b] = interpolateGradientColor(normalized, SST_GRADIENT);
   return [r, g, b, 220];
-};
-
-const getSstElevation = (
-  value: number,
-  range: { min: number; max: number }
-) => {
-  if (!Number.isFinite(value)) return 0;
-  const span = range.max - range.min;
-  const normalized = span === 0 ? 0 : (value - range.min) / span;
-  const clamped = clamp(normalized, 0, 1);
-  return clamped * 60000;
 };
 
 const getPredictionColor = (
@@ -454,6 +443,7 @@ export default function GlobeApp() {
   const [userLocation, setUserLocation] =
     useState<ChatRequestPayload["userLocation"]>(null);
   const [chatMode, setChatMode] = useState<ChatMode>("agent");
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const [focusArea, setFocusArea] = useState<FocusArea | null>(null);
   const [h3Highlights, setH3Highlights] = useState<H3Highlight[]>([]);
 
@@ -1091,7 +1081,7 @@ export default function GlobeApp() {
           data: planktonData,
           getPolygon: (d) =>
             typeof d.h3 === "string" && h3.isValidCell(d.h3)
-              ? h3.cellToBoundary(d.h3, true).map(([lat, lon]) => [lon, lat])
+              ? h3.cellToBoundary(d.h3).map(([lat, lon]) => [lat, lon])
               : null,
           getFillColor: [r, g, b, 200],
           getLineColor: [r, g, b, 220],
@@ -1107,17 +1097,21 @@ export default function GlobeApp() {
     const sstCfg = getLayerCfg("sst");
     if (sstCfg?.enabled && sstData.length) {
       arr.push(
-        new H3HexagonLayer({
+        new PolygonLayer({
           id: "sst-h3",
           data: sstData,
+          getPolygon: (d: DataPoint) =>
+            typeof d.h3 === "string" && h3.isValidCell(d.h3)
+              ? h3.cellToBoundary(d.h3).map(([lat, lon]) => [lon, lat])
+              : null,
+          getFillColor: (d: DataPoint) =>
+            getSstColor(Number(d.sst_mean_celsius), sstRange),
+          getLineColor: [255, 255, 255, 30],
+          lineWidthMinPixels: 0.5,
+          stroked: true,
+          filled: true,
           opacity: sstCfg.opacity,
           pickable: true,
-          getHexagon: (d) => d.h3,
-          getFillColor: (d) =>
-            getSstColor(Number(d.sst_mean_celsius), sstRange),
-          getElevation: (d) =>
-            getSstElevation(Number(d.sst_mean_celsius), sstRange),
-          extruded: true,
         })
       );
     }
@@ -1221,7 +1215,7 @@ export default function GlobeApp() {
             data: highlight.cells,
             getPolygon: (d) =>
               d.h3
-                ? h3.cellToBoundary(d.h3, true).map(([lat, lon]) => [lon, lat])
+                ? h3.cellToBoundary(d.h3).map(([lat, lon]) => [lat, lon])
                 : null,
             stroked: false,
             filled: true,
@@ -1251,14 +1245,69 @@ export default function GlobeApp() {
       style={{
         position: "absolute",
         inset: 0,
+        paddingTop: "96px",
+        paddingBottom: "40px",
         background: "linear-gradient(180deg,#000,#0a1a2b)",
-        overflow: "hidden",
+        overflow: "auto",
       }}
     >
-      <div className="flex h-full w-full">
-        <div className="relative flex-1 px-4 pb-4 pt-24 xl:px-10 xl:pb-10">
+      <div className="flex min-h-[calc(100vh-136px)] w-full flex-col gap-6 px-4 pb-6 xl:flex-row xl:gap-8 xl:px-10">
+        <div className="flex w-full flex-col gap-6 xl:flex-row xl:items-stretch xl:gap-8">
+          <div className="flex-1 order-1 xl:order-2">
+            <div className="relative w-full overflow-hidden rounded-3xl border border-cyan-500/20 bg-slate-950/20 shadow-[0_0_40px_rgba(0,255,255,0.08)] aspect-square sm:aspect-[4/3] xl:aspect-auto xl:h-full xl:min-h-[680px]">
+              <Map
+                ref={mapRef}
+                reuseMaps
+                projection="globe"
+                initialViewState={INITIAL_VIEW_STATE}
+                mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+                onMove={(event) => setViewState(event.viewState)}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                }}
+              >
+                <DeckGLOverlay
+                  layers={deckLayers}
+                  getTooltip={getTooltip}
+                  interleaved
+                />
+              </Map>
+            </div>
+          </div>
+
+          <div className="order-2 xl:order-1 hidden xl:flex w-[320px] shrink-0 flex-col">
+            <LayerControlPanel
+              className="w-full"
+              layers={layers}
+              onToggleLayer={handleToggleLayer}
+              onOpacityChange={handleOpacityChange}
+              onOpenSpeciesFilter={() => setSpeciesModalOpen(true)}
+              hasSpeciesFilter={sharkSpecies.length > 0}
+              onOpenPredictionFilter={() => setPredictionModalOpen(true)}
+              hasPredictionFilter={predictionSpecies.length > 0}
+              predictionFilterLabel={predictionFilterLabel}
+              loadingState={loadingState}
+            />
+          </div>
+
+          <ChatPanel
+            messages={chatMessages}
+            inputValue={chatInput}
+            onChangeInput={setChatInput}
+            onSend={handleSendChat}
+            isSending={isChatSending}
+            mode={chatMode}
+            onModeChange={setChatMode}
+            containerClassName="hidden xl:flex order-3 h-full w-[360px] flex-col overflow-hidden rounded-3xl border border-cyan-500/20 bg-slate-950/60 backdrop-blur-md text-slate-100"
+          />
+        </div>
+
+        <div className="xl:hidden order-2">
           <LayerControlPanel
-            className="xl:hidden absolute left-6 top-24 z-10 w-80"
+            className="w-full"
             layers={layers}
             onToggleLayer={handleToggleLayer}
             onOpacityChange={handleOpacityChange}
@@ -1269,49 +1318,39 @@ export default function GlobeApp() {
             predictionFilterLabel={predictionFilterLabel}
             loadingState={loadingState}
           />
-          <div className="relative h-full w-full rounded-3xl border border-cyan-500/20 bg-slate-950/20 shadow-[0_0_40px_rgba(0,255,255,0.08)]">
-            <div className="absolute left-6 top-6 z-20 hidden xl:block w-[300px]">
-              <LayerControlPanel
-                className="w-full"
-                layers={layers}
-                onToggleLayer={handleToggleLayer}
-                onOpacityChange={handleOpacityChange}
-                onOpenSpeciesFilter={() => setSpeciesModalOpen(true)}
-                hasSpeciesFilter={sharkSpecies.length > 0}
-                onOpenPredictionFilter={() => setPredictionModalOpen(true)}
-                hasPredictionFilter={predictionSpecies.length > 0}
-                predictionFilterLabel={predictionFilterLabel}
-                loadingState={loadingState}
-              />
-            </div>
-            <Map
-              ref={mapRef}
-              reuseMaps
-              projection="globe"
-              initialViewState={INITIAL_VIEW_STATE}
-              mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
-              onMove={(event) => setViewState(event.viewState)}
-              style={{ width: "100%", height: "100%", borderRadius: "24px" }}
-            >
-              <DeckGLOverlay
-                layers={deckLayers}
-                getTooltip={getTooltip}
-                interleaved
-              />
-            </Map>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setIsMobileChatOpen(true)}
+        className="fixed bottom-6 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-cyan-500 text-slate-950 shadow-[0_10px_30px_rgba(56,189,248,0.4)] transition hover:bg-cyan-400 xl:hidden"
+        aria-label="Open chat"
+      >
+        <MessageCircle className="w-6 h-6" />
+      </button>
+
+      {isMobileChatOpen && (
+        <div className="fixed inset-0 z-40 xl:hidden">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setIsMobileChatOpen(false)}
+          />
+          <div className="absolute inset-x-0 bottom-0 h-[75vh] rounded-t-3xl border-t border-cyan-500/30 bg-slate-950 shadow-[0_-20px_60px_rgba(8,145,178,0.35)] overflow-hidden">
+            <ChatPanel
+              messages={chatMessages}
+              inputValue={chatInput}
+              onChangeInput={setChatInput}
+              onSend={handleSendChat}
+              isSending={isChatSending}
+              mode={chatMode}
+              onModeChange={setChatMode}
+              containerClassName="flex h-full w-full flex-col bg-slate-950 text-slate-100 pt-6"
+              onClose={() => setIsMobileChatOpen(false)}
+            />
           </div>
         </div>
-
-        <ChatPanel
-          messages={chatMessages}
-          inputValue={chatInput}
-          onChangeInput={setChatInput}
-          onSend={handleSendChat}
-          isSending={isChatSending}
-          mode={chatMode}
-          onModeChange={setChatMode}
-        />
-      </div>
+      )}
       {sharkSpecies.length > 0 && isSpeciesModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="w-[90vw] max-w-xl bg-slate-900/95 border border-cyan-500/40 rounded-2xl shadow-2xl text-slate-100 overflow-hidden">

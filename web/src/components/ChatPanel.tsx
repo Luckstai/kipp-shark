@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { SendHorizonal, Bot, User, MessageCircle } from "lucide-react";
+import { SendHorizonal, Bot, User, MessageCircle, X } from "lucide-react";
 
 export type ChatRole = "user" | "assistant";
 
@@ -18,6 +18,8 @@ interface ChatPanelProps {
   isSending?: boolean;
   mode: "chat" | "agent";
   onModeChange: (mode: "chat" | "agent") => void;
+  containerClassName?: string;
+  onClose?: () => void;
 }
 
 export default function ChatPanel({
@@ -28,13 +30,20 @@ export default function ChatPanel({
   isSending,
   mode,
   onModeChange,
+  containerClassName,
+  onClose,
 }: ChatPanelProps) {
   const canSend = inputValue.trim().length > 0 && !isSending;
 
   const groupedMessages = useMemo(() => messages.slice(-20), [messages]);
 
   return (
-    <aside className="hidden xl:flex w-[360px] shrink-0 flex-col border-l border-cyan-500/20 bg-slate-950/60 backdrop-blur-md text-slate-100 pt-24">
+    <aside
+      className={
+        containerClassName ??
+        "hidden xl:flex h-full w-[360px] shrink-0 flex-col overflow-hidden border-l border-cyan-500/20 bg-slate-950/60 backdrop-blur-md text-slate-100 pt-24"
+      }
+    >
       <header className="px-5 py-4 border-b border-cyan-500/20">
         <div className="flex items-center justify-between">
           <div>
@@ -66,6 +75,16 @@ export default function ChatPanel({
             >
               <Bot className="w-3 h-3" /> Agent
             </button>
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-slate-700/60 bg-slate-800/60 p-2 text-slate-400 hover:border-cyan-400/40 hover:text-cyan-200 transition"
+                aria-label="Close chat"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
         </div>
       </header>
