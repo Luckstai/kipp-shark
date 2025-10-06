@@ -251,6 +251,27 @@ const PREDICTION_GRADIENT: GradientStop[] = [
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 
+const normalizeToRange = (
+  value: number,
+  range: { min: number; max: number }
+) => {
+  if (!Number.isFinite(value)) return 0;
+  const span = range.max - range.min;
+  if (!Number.isFinite(span) || span <= 0) return 0;
+  return clamp((value - range.min) / span, 0, 1);
+};
+
+const DEFAULT_SST_RANGE = { min: -2, max: 35 } as const;
+
+const convertSstValue = (value: number | null | undefined): number | null => {
+  if (!Number.isFinite(value)) return null;
+  const numeric = Number(value);
+  if (Math.abs(numeric) <= 2) {
+    return numeric * 100;
+  }
+  return numeric;
+};
+
 const interpolateGradientColor = (
   t: number,
   stops: GradientStop[]
@@ -284,13 +305,137 @@ const getSstColor = (
   value: number,
   range: { min: number; max: number }
 ): [number, number, number, number] => {
-  if (!Number.isFinite(value)) {
+  const converted = convertSstValue(value);
+  if (converted === null) {
     return [67, 147, 195, 180];
   }
-  const span = range.max - range.min;
-  const normalized = span === 0 ? 0 : (value - range.min) / span;
+  const normalized = normalizeToRange(converted, DEFAULT_SST_RANGE);
   const [r, g, b] = interpolateGradientColor(normalized, SST_GRADIENT);
   return [r, g, b, 220];
+};
+
+const PLANKTON_GRADIENT: GradientStop[] = [
+  { t: 0, color: [15, 23, 42], hex: "#0f172a" },
+  { t: 0.35, color: [13, 148, 136], hex: "#0d9488" },
+  { t: 0.6, color: [34, 197, 94], hex: "#22c55e" },
+  { t: 1, color: [250, 204, 21], hex: "#facc15" },
+];
+
+const getPlanktonColor = (
+  value: number,
+  range: { min: number; max: number }
+): [number, number, number, number] => {
+  const normalized = normalizeToRange(value, range);
+  const [r, g, b] = interpolateGradientColor(normalized, PLANKTON_GRADIENT);
+  return [r, g, b, Math.round(120 + normalized * 110)];
+};
+
+const getPlanktonElevation = (
+  value: number,
+  range: { min: number; max: number }
+) => {
+  const normalized = normalizeToRange(value, range);
+  return normalized * 20000;
+};
+
+const getSstElevation = (
+  value: number,
+  range: { min: number; max: number }
+) => {
+  const converted = convertSstValue(value);
+  if (converted === null) return 0;
+  const normalized = normalizeToRange(converted, DEFAULT_SST_RANGE);
+  return normalized * 15000;
+};
+
+const computeRange = (values: number[]): { min: number; max: number } | null => {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (!Number.isFinite(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return null;
+  }
+
+  return { min, max };
+};
+
+const coerceH3Index = (value: unknown): string | null => {
+  if (typeof value === "string" && h3.isValidCell(value)) {
+    return value;
+  }
+  if (typeof value === "number") {
+    const asString = value.toString(16);
+    if (h3.isValidCell(asString)) {
+      return asString;
+    }
+  }
+  return null;
+};
+
+const resolveH3FromRow = (row: DataPoint): string | null => {
+  const direct = coerceH3Index(
+    row.h3 ?? row.h3_index ?? row.h3_cell ?? row.h3Id ?? row.h
+  );
+  if (direct) return direct;
+
+  const lat = Number(row.latitude ?? row.lat ?? row.centroid_lat);
+  const lon = Number(row.longitude ?? row.lon ?? row.centroid_lon);
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    try {
+      return h3.latLngToCell(lat, lon, 6);
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.warn("Failed to derive H3 cell from lat/lon", error);
+      }
+    }
+  }
+  return null;
+};
+
+const readNumericField = (
+  source: any,
+  key: string,
+  aliases: string[] = []
+): number | null => {
+  if (!source) return null;
+  const candidates = [key, ...aliases];
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    const rawValue = source?.[candidate];
+    const numeric = Number(rawValue);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+
+  const colorValue = Number(source?.colorValue);
+  if (Number.isFinite(colorValue)) {
+    return colorValue;
+  }
+  const elevationValue = Number(source?.elevationValue);
+  if (Number.isFinite(elevationValue)) {
+    return elevationValue;
+  }
+
+  const points = source?.points;
+  if (Array.isArray(points)) {
+    for (let i = 0; i < points.length; i += 1) {
+      const result = readNumericField(points[i], key, aliases);
+      if (result !== null && Number.isFinite(result)) {
+        return result;
+      }
+    }
+  }
+
+  return null;
 };
 
 const getPredictionColor = (
@@ -407,7 +552,10 @@ export default function GlobeApp() {
   const [swotData, setSwotData] = useState<DataPoint[]>([]);
   const [sharksData, setSharksData] = useState<DataPoint[]>([]);
   const [predData, setPredData] = useState<DataPoint[]>([]);
-  const [sstRange, setSstRange] = useState({ min: 0, max: 1 });
+  const [sstRange, setSstRange] = useState({
+    min: DEFAULT_SST_RANGE.min,
+    max: DEFAULT_SST_RANGE.max,
+  });
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
   const [isSpeciesModalOpen, setSpeciesModalOpen] = useState(false);
   const [selectedPredictionSpecies, setSelectedPredictionSpecies] = useState<
@@ -504,7 +652,7 @@ export default function GlobeApp() {
     {
       id: "swot",
       name: "Ocean Eddies (SSH)",
-      color: "#fdae61",
+      color: "#7de1ff",
       enabled: false,
       opacity: 0.85,
     },
@@ -646,24 +794,41 @@ export default function GlobeApp() {
 
   useEffect(() => {
     if (!sstData.length) {
-      setSstRange({ min: 0, max: 1 });
+      setSstRange({
+        min: DEFAULT_SST_RANGE.min,
+        max: DEFAULT_SST_RANGE.max,
+      });
       return;
     }
 
-    const values = sstData
-      .map((row) => Number(row.sst_mean_celsius))
-      .filter((value) => Number.isFinite(value));
+    const convertedValues = sstData
+      .map((row) =>
+        convertSstValue(
+          readNumericField(row, "sst_mean_celsius", [
+            "sst",
+            "sst_mean",
+            "value",
+            "mean",
+            "avg",
+          ])
+        )
+      )
+      .filter((value): value is number => Number.isFinite(value));
 
-    if (!values.length) {
-      setSstRange({ min: 0, max: 1 });
+    const range = computeRange(convertedValues);
+
+    if (!range) {
+      setSstRange({
+        min: DEFAULT_SST_RANGE.min,
+        max: DEFAULT_SST_RANGE.max,
+      });
       return;
     }
 
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    if (Number.isFinite(min) && Number.isFinite(max)) {
-      setSstRange({ min, max });
-    }
+    setSstRange({
+      min: Math.min(range.min, DEFAULT_SST_RANGE.min),
+      max: Math.max(range.max, DEFAULT_SST_RANGE.max),
+    });
   }, [sstData]);
 
   const getLayerCfg = useCallback(
@@ -750,22 +915,49 @@ export default function GlobeApp() {
 
   const getTooltip = useCallback(({ object }: any) => {
     if (!object) return null;
-    if ("chlor_a_mean" in object)
-      return { html: `<b>Plankton</b><br>Chlorophyll: ${object.chlor_a_mean}` };
-    if ("sst_mean_celsius" in object)
-      return { html: `<b>SST</b><br>${object.sst_mean_celsius} °C` };
+
+    const planktonValue = readNumericField(object, "chlor_a_mean", [
+      "chlor_a",
+      "value",
+      "mean",
+      "avg",
+    ]);
+    if (planktonValue !== null) {
+      return {
+        html: `<b>Plankton</b><br>Chlorophyll: ${planktonValue.toFixed(3)}`,
+      };
+    }
+
+    const sstValue = convertSstValue(
+      readNumericField(object, "sst_mean_celsius", [
+        "sst",
+        "sst_mean",
+        "value",
+        "mean",
+        "avg",
+      ])
+    );
+    if (sstValue !== null) {
+      return {
+        html: `<b>SST</b><br>${sstValue.toFixed(2)} °C`,
+      };
+    }
+
     if ("ssha_karin" in object)
       return { html: `<b>SSH</b><br>${object.ssha_karin}` };
+
     if ("species" in object)
       return { html: `<b>${object.species}</b><br>${object.date}` };
-    if ("probability" in object || "prediction" in object) {
-      const value = Number(object.probability ?? object.prediction ?? 0);
-      if (Number.isFinite(value)) {
-        return {
-          html: `<b>Prediction</b><br>${(value * 100).toFixed(0)}%`,
-        };
-      }
+
+    const predictionValue =
+      readNumericField(object, "probability") ??
+      readNumericField(object, "prediction");
+    if (predictionValue !== null) {
+      return {
+        html: `<b>Prediction</b><br>${(predictionValue * 100).toFixed(0)}%`,
+      };
     }
+
     return null;
   }, []);
 
@@ -1112,27 +1304,91 @@ export default function GlobeApp() {
       });
   }, [chatInput, applyCommand, buildChatPayload]);
 
+  const planktonRange = useMemo(() => {
+    if (!planktonData.length) {
+      return { min: 0, max: 1 };
+    }
+
+    const range = computeRange(
+      planktonData
+        .map((row) =>
+          readNumericField(row, "chlor_a_mean", [
+            "chlor_a",
+            "value",
+            "mean",
+            "avg",
+          ])
+        )
+        .filter((value): value is number => Number.isFinite(value))
+    );
+
+    if (!range) {
+      return { min: 0, max: 1 };
+    }
+
+    return range;
+  }, [planktonData]);
+
   const deckLayers = useMemo(() => {
     const arr: any[] = [];
 
     const planktonCfg = getLayerCfg("plankton");
     if (planktonCfg?.enabled && planktonData.length) {
-      const [r, g, b] = hexToRgb(planktonCfg.color);
       arr.push(
-        new PolygonLayer({
+        new H3HexagonLayer({
           id: "plankton-h3",
           data: planktonData,
-          getPolygon: (d) =>
-            typeof d.h3 === "string" && h3.isValidCell(d.h3)
-              ? h3.cellToBoundary(d.h3).map(([lat, lon]) => [lat, lon])
-              : null,
-          getFillColor: [r, g, b, 200],
-          getLineColor: [r, g, b, 220],
-          lineWidthMinPixels: 1,
-          stroked: true,
-          filled: true,
           opacity: planktonCfg.opacity,
           pickable: true,
+          extruded: true,
+          elevationScale: 1,
+          colorAggregation: "MEAN",
+          elevationAggregation: "MEAN",
+          getColorWeight: (d: DataPoint) =>
+            readNumericField(d, "chlor_a_mean", [
+              "chlor_a",
+              "value",
+              "mean",
+              "avg",
+            ]) ?? 0,
+          getColorValue: (values: number[]) => {
+            if (!values.length) return 0;
+            const sum = values.reduce((acc, val) => acc + val, 0);
+            return sum / values.length;
+          },
+          getElevationWeight: (d: DataPoint) =>
+            readNumericField(d, "chlor_a_mean", [
+              "chlor_a",
+              "value",
+              "mean",
+              "avg",
+            ]) ?? 0,
+          getElevationValue: (values: number[]) => {
+            if (!values.length) return 0;
+            const sum = values.reduce((acc, val) => acc + val, 0);
+            return sum / values.length;
+          },
+          getHexagon: (d: DataPoint) => resolveH3FromRow(d),
+          getFillColor: (d: DataPoint) =>
+            getPlanktonColor(
+              readNumericField(d, "chlor_a_mean", [
+                "chlor_a",
+                "value",
+                "mean",
+                "avg",
+              ]) ?? Number.NaN,
+              planktonRange
+            ),
+          getElevation: (d: DataPoint) =>
+            getPlanktonElevation(
+              readNumericField(d, "chlor_a_mean", [
+                "chlor_a",
+                "value",
+                "mean",
+                "avg",
+              ]) ?? Number.NaN,
+              planktonRange
+            ),
         })
       );
     }
@@ -1140,21 +1396,68 @@ export default function GlobeApp() {
     const sstCfg = getLayerCfg("sst");
     if (sstCfg?.enabled && sstData.length) {
       arr.push(
-        new PolygonLayer({
+        new H3HexagonLayer({
           id: "sst-h3",
           data: sstData,
-          getPolygon: (d: DataPoint) =>
-            typeof d.h3 === "string" && h3.isValidCell(d.h3)
-              ? h3.cellToBoundary(d.h3).map(([lat, lon]) => [lon, lat])
-              : null,
-          getFillColor: (d: DataPoint) =>
-            getSstColor(Number(d.sst_mean_celsius), sstRange),
-          getLineColor: [255, 255, 255, 30],
-          lineWidthMinPixels: 0.5,
-          stroked: true,
-          filled: true,
           opacity: sstCfg.opacity,
           pickable: true,
+          extruded: true,
+          elevationScale: 1,
+          colorAggregation: "MEAN",
+          elevationAggregation: "MEAN",
+          getColorWeight: (d: DataPoint) =>
+            convertSstValue(
+              readNumericField(d, "sst_mean_celsius", [
+                "sst",
+                "sst_mean",
+                "value",
+                "mean",
+                "avg",
+              ])
+            ) ?? 0,
+          getColorValue: (values: number[]) => {
+            if (!values.length) return 0;
+            const sum = values.reduce((acc, val) => acc + val, 0);
+            return sum / values.length;
+          },
+          getElevationWeight: (d: DataPoint) =>
+            convertSstValue(
+              readNumericField(d, "sst_mean_celsius", [
+                "sst",
+                "sst_mean",
+                "value",
+                "mean",
+                "avg",
+              ])
+            ) ?? 0,
+          getElevationValue: (values: number[]) => {
+            if (!values.length) return 0;
+            const sum = values.reduce((acc, val) => acc + val, 0);
+            return sum / values.length;
+          },
+          getHexagon: (d: DataPoint) => resolveH3FromRow(d),
+          getFillColor: (d: DataPoint) =>
+            getSstColor(
+              readNumericField(d, "sst_mean_celsius", [
+                "sst",
+                "sst_mean",
+                "value",
+                "mean",
+                "avg",
+              ]) ?? Number.NaN,
+              sstRange
+            ),
+          getElevation: (d: DataPoint) =>
+            getSstElevation(
+              readNumericField(d, "sst_mean_celsius", [
+                "sst",
+                "sst_mean",
+                "value",
+                "mean",
+                "avg",
+              ]) ?? Number.NaN,
+              sstRange
+            ),
         })
       );
     }
@@ -1162,21 +1465,18 @@ export default function GlobeApp() {
     const swotCfg = getLayerCfg("swot");
     if (swotCfg?.enabled && swotData.length) {
       arr.push(
-        new ScatterplotLayer({
-          id: "swot-scatter",
+        new H3HexagonLayer({
+          id: "swot-h3",
           data: swotData,
-          getPosition: (d) => [d.longitude, d.latitude],
-          getRadius: 70000,
-          radiusScale: 1,
-          radiusMinPixels: 2,
-          radiusMaxPixels: 30,
-          getFillColor: (d) => {
-            const ssh = Number(d.ssha_karin) || 0;
-            return ssh >= 0 ? [253, 174, 97, 220] : [49, 54, 149, 220];
-          },
           opacity: swotCfg.opacity,
-          stroked: false,
           pickable: true,
+          extruded: false,
+          getHexagon: (d: DataPoint) => resolveH3FromRow(d),
+          getFillColor: [125, 223, 255, 210],
+          getLineColor: [173, 240, 255, 230],
+          lineWidthMinPixels: 0.6,
+          stroked: true,
+          filled: true,
         })
       );
     }
@@ -1210,8 +1510,7 @@ export default function GlobeApp() {
           data: activePredData,
           opacity: predCfg.opacity,
           pickable: true,
-          getHexagon: (d) =>
-            typeof d.h3 === "string" && h3.isValidCell(d.h3) ? d.h3 : null,
+          getHexagon: (d) => resolveH3FromRow(d),
           getFillColor: (d) =>
             getPredictionColor(Number(d.probability ?? d.prediction)),
           getElevation: (d) =>
@@ -1243,7 +1542,7 @@ export default function GlobeApp() {
           new H3HexagonLayer({
             id: `highlight-h3-${highlight.layerId}`,
             data: highlight.cells,
-            getHexagon: (d) => (d.h3 ? d.h3 : null),
+          getHexagon: (d) => resolveH3FromRow(d),
             getElevation: (d) => (Number(d.weight) || 0) * 50000,
             getFillColor: [138, 43, 226, 180],
             opacity: 0.85,
@@ -1272,6 +1571,7 @@ export default function GlobeApp() {
     return arr;
   }, [
     planktonData,
+    planktonRange,
     sstData,
     swotData,
     sharksData,
@@ -1298,6 +1598,16 @@ export default function GlobeApp() {
         <div className="flex w-full flex-col gap-6 xl:flex-row xl:items-stretch xl:gap-8">
           <div className="flex-1 order-1 xl:order-2">
             <div className="relative w-full overflow-hidden rounded-3xl border border-cyan-500/20 bg-slate-950/20 shadow-[0_0_40px_rgba(0,255,255,0.08)] aspect-square sm:aspect-[4/3] xl:aspect-auto xl:h-full xl:min-h-[680px]">
+              {isAnyDatasetLoading && (
+                <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+                  <div className="flex flex-col items-center gap-3 text-cyan-200">
+                    <span className="inline-flex h-10 w-10 animate-spin rounded-full border-2 border-cyan-300 border-t-transparent" />
+                    <span className="text-sm font-medium uppercase tracking-[0.2em] text-cyan-100/80">
+                      Loading data…
+                    </span>
+                  </div>
+                </div>
+              )}
               <Map
                 ref={mapRef}
                 reuseMaps
