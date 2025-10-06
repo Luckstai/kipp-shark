@@ -38,11 +38,11 @@ except Exception as _e:
 # =========================
 # SHORT_NAME = "MODISA_L3m_CHL_NRT"   # Dataset NRT diário
 SHORT_NAME = "MODISA_L3m_CHL"   # Dataset NRT diário
-GRANULE_NAME = "*DAY*.4km*"         # filtro do granule: diário + 4km
+GRANULE_NAME = "*.MO*.9km*"         # filtro do granule: diário + 4km
 PROVIDER = "OB_CLOUD"
 
 START_DATE = dt.date(2015, 1, 1)
-END_DATE = dt.date.today()
+END_DATE = dt.date(2025, 1, 1)
 
 BASE_DIR = Path("downloads/planctons")
 NC_DIR = BASE_DIR / "nc"
