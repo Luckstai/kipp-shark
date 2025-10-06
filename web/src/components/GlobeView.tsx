@@ -130,7 +130,7 @@ type H3Highlight = {
 const s3Domain = "https://source-bucket-kipp.s3.us-west-2.amazonaws.com";
 const s3BucketName = "hackathon-nasa-2025";
 const s3Bucket = `${s3Domain}/${s3BucketName}`;
-const CHAT_API_URL = "https://kipp-nasa.app.n8n.cloud/webhook-test/chat"; // TODO: configure when backend is ready
+const CHAT_API_URL = "https://kipp-nasa.app.n8n.cloud/webhook/chat";
 
 type ChatMode = "chat" | "agent";
 
@@ -1069,8 +1069,7 @@ export default function GlobeApp() {
         const assistantMessage: ChatMessage = {
           id: crypto.randomUUID(),
           role: "assistant",
-          content:
-            "I couldn't process your request. Please try again shortly.",
+          content: "I couldn't process your request. Please try again shortly.",
           timestamp: new Date().toISOString(),
         };
         setChatMessages((prev) => [...prev.slice(-19), assistantMessage]);
